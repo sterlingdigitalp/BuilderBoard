@@ -10,6 +10,8 @@ const MIGRATION_0001: &str =
     include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../migrations/0001_initial_schema.sql"));
 const MIGRATION_0002: &str =
     include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../migrations/0002_accounts_is_default.sql"));
+const MIGRATION_0003: &str =
+    include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../migrations/0003_google_oauth_config.sql"));
 
 #[cfg(test)]
 pub(crate) const MIGRATION_0001_FOR_TEST: &str = MIGRATION_0001;
@@ -18,6 +20,8 @@ pub(crate) const MIGRATIONS_FOR_TEST: &str = concat!(
     include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../migrations/0001_initial_schema.sql")),
     "\n",
     include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../migrations/0002_accounts_is_default.sql")),
+    "\n",
+    include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../migrations/0003_google_oauth_config.sql")),
 );
 
 pub struct Migration {
@@ -46,6 +50,10 @@ impl MigrationRunner {
                 Migration {
                     version: "0002_accounts_is_default",
                     sql: MIGRATION_0002,
+                },
+                Migration {
+                    version: "0003_google_oauth_config",
+                    sql: MIGRATION_0003,
                 },
             ],
         }

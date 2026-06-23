@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use tauri::State;
 
 use crate::auth::CredentialService;
@@ -13,7 +15,7 @@ use crate::storage::repositories::panes::PaneRepository;
 use crate::storage::repositories::providers::ProviderRepository;
 
 #[tauri::command]
-pub fn provider_list(database: State<'_, Database>) -> Result<Vec<ProviderDto>, String> {
+pub fn provider_list(database: State<'_, Arc<Database>>) -> Result<Vec<ProviderDto>, String> {
     provider_list_from_database(database.inner())
 }
 
@@ -25,7 +27,7 @@ pub fn provider_list_from_database(database: &Database) -> Result<Vec<ProviderDt
 
 #[tauri::command]
 pub fn pane_list(
-    database: State<'_, Database>,
+    database: State<'_, Arc<Database>>,
     workspace_id: Option<String>,
 ) -> Result<Vec<PaneDto>, String> {
     database
@@ -37,7 +39,7 @@ pub fn pane_list(
 
 #[tauri::command]
 pub fn pane_create(
-    database: State<'_, Database>,
+    database: State<'_, Arc<Database>>,
     workspace_id: Option<String>,
     title: Option<String>,
     sort_order: Option<i32>,
@@ -57,14 +59,14 @@ pub fn pane_create(
 }
 
 #[tauri::command]
-pub fn pane_close(database: State<'_, Database>, pane_id: String) -> Result<(), String> {
+pub fn pane_close(database: State<'_, Arc<Database>>, pane_id: String) -> Result<(), String> {
     database
         .with_connection(|connection| PaneRepository::close(connection, &pane_id))
         .map_err(format_storage_error)
 }
 
 #[tauri::command]
-pub fn message_list(database: State<'_, Database>, pane_id: String) -> Result<Vec<MessageDto>, String> {
+pub fn message_list(database: State<'_, Arc<Database>>, pane_id: String) -> Result<Vec<MessageDto>, String> {
     database
         .with_connection(|connection| MessageRepository::list_for_pane(connection, &pane_id))
         .map_err(format_storage_error)
@@ -72,7 +74,7 @@ pub fn message_list(database: State<'_, Database>, pane_id: String) -> Result<Ve
 
 #[tauri::command]
 pub fn message_append(
-    database: State<'_, Database>,
+    database: State<'_, Arc<Database>>,
     pane_id: String,
     role: String,
     content: String,
@@ -97,8 +99,8 @@ pub fn message_append(
 
 #[tauri::command]
 pub fn account_create_api_key(
-    database: State<'_, Database>,
-    credentials: State<'_, CredentialService>,
+    database: State<'_, Arc<Database>>,
+    credentials: State<'_, Arc<CredentialService>>,
     provider_id: String,
     label: String,
     api_key: String,
@@ -117,7 +119,7 @@ pub fn account_create_api_key(
 
 #[tauri::command]
 pub fn account_list(
-    database: State<'_, Database>,
+    database: State<'_, Arc<Database>>,
     provider_id: Option<String>,
 ) -> Result<Vec<AccountDto>, String> {
     account_list_from_database(database.inner(), provider_id).map_err(format_storage_error)
@@ -125,8 +127,8 @@ pub fn account_list(
 
 #[tauri::command]
 pub fn account_disconnect(
-    database: State<'_, Database>,
-    credentials: State<'_, CredentialService>,
+    database: State<'_, Arc<Database>>,
+    credentials: State<'_, Arc<CredentialService>>,
     account_id: String,
 ) -> Result<(), String> {
     account_disconnect_with_service(database.inner(), credentials.inner(), account_id)
@@ -135,7 +137,7 @@ pub fn account_disconnect(
 
 #[tauri::command]
 pub fn account_get_status(
-    database: State<'_, Database>,
+    database: State<'_, Arc<Database>>,
     account_id: String,
 ) -> Result<AccountStatusDto, String> {
     database

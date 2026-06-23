@@ -5,24 +5,28 @@ pub mod migrations;
 pub mod models;
 pub mod repositories;
 
+use std::sync::Arc;
+
 use tauri::Manager;
 
-use crate::auth::CredentialService;
+use crate::auth::{CredentialService, OAuthService};
 
 use db::Database;
 
 pub fn run() -> tauri::Result<()> {
     tauri::Builder::default()
         .setup(|app| {
-            let database = Database::initialize_default().map_err(|error| {
+            let database = Arc::new(Database::initialize_default().map_err(|error| {
                 tauri::Error::Io(std::io::Error::new(
                     std::io::ErrorKind::Other,
                     error.to_string(),
                 ))
-            })?;
-            let credentials = CredentialService::keychain();
+            })?);
+            let credentials = Arc::new(CredentialService::keychain());
+            let oauth = Arc::new(OAuthService::production());
             app.manage(database);
             app.manage(credentials);
+            app.manage(oauth);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -36,6 +40,8 @@ pub fn run() -> tauri::Result<()> {
             commands::account_list,
             commands::account_disconnect,
             commands::account_get_status,
+            crate::auth::commands::oauth_start,
+            crate::auth::commands::oauth_cancel,
         ])
         .run(tauri::generate_context!())
 }

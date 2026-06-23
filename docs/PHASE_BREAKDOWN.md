@@ -162,14 +162,18 @@ See [PHASE3A_IMPLEMENTATION.md](./PHASE3A_IMPLEMENTATION.md).
 - Missing, inactive, and unsupported-provider resolution failures return structured errors
 - No OAuth, networking, streaming, or model execution is introduced
 
-### 3B: OAuth Flow (Backend)
+### 3B: OAuth Flow (Backend) ✅
 
-| Deliverable | Description |
-|-------------|-------------|
-| PKCE flow | Per OAUTH_DESIGN |
-| Loopback callback server | Ephemeral port, 5-min timeout |
-| Token refresh | Proactive refresh before expiry |
-| `oauth_start` command | Opens system browser |
+| Deliverable | Status | Description |
+|-------------|--------|-------------|
+| PKCE flow | ✅ | S256 per OAUTH_DESIGN |
+| Loopback callback server | ✅ | Ephemeral port, 5-min timeout |
+| Token refresh | ✅ | Proactive refresh before expiry |
+| `oauth_start` / `oauth_cancel` | ✅ | System browser via macOS `open` |
+| `oauth_complete` / `oauth_error` events | ✅ | Tauri event emission |
+| OAuth account provider resolution | ✅ | Explicit/default OAuth accounts resolve to `CredentialHandle` + `LLMProvider` |
+
+See [PHASE3B_IMPLEMENTATION.md](./PHASE3B_IMPLEMENTATION.md).
 
 **Acceptance criteria:**
 
@@ -177,6 +181,8 @@ See [PHASE3A_IMPLEMENTATION.md](./PHASE3A_IMPLEMENTATION.md).
 - Tokens in Keychain only
 - Expired account marked `status = expired`
 - Builder B adapters receive credentials via Credential Service
+- Expired OAuth accounts return structured `expired_account` before provider execution
+- No model execution, provider API networking, or streaming is introduced
 
 ### 3C: Account UI (Builder A)
 

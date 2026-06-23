@@ -4,6 +4,9 @@ import type {
   AccountDto,
   AccountStatus,
   AccountAuthType,
+  OAuthCompleteEvent,
+  OAuthErrorEvent,
+  OAuthStartResult,
   ProviderAuthMode,
   ProviderDto
 } from "../types/accounts";
@@ -70,7 +73,41 @@ export function toProviderDto(value: unknown): ProviderDto {
   };
 }
 
-// Phase 3A consumes account metadata commands only; API key values are never returned.
+function toOAuthStartResult(value: unknown): OAuthStartResult {
+  if (!isRecord(value)) {
+    return { authUrl: null };
+  }
+
+  return {
+    authUrl: nullableString(value.authUrl)
+  };
+}
+
+export function toOAuthCompleteEvent(value: unknown): OAuthCompleteEvent | null {
+  if (!isRecord(value) || typeof value.accountId !== "string" || typeof value.providerId !== "string") {
+    return null;
+  }
+
+  return {
+    accountId: value.accountId,
+    providerId: value.providerId,
+    label: typeof value.label === "string" ? value.label : undefined
+  };
+}
+
+export function toOAuthErrorEvent(value: unknown): OAuthErrorEvent | null {
+  if (!isRecord(value) || typeof value.providerId !== "string") {
+    return null;
+  }
+
+  return {
+    providerId: value.providerId,
+    errorCode: typeof value.errorCode === "string" ? value.errorCode : undefined,
+    message: typeof value.message === "string" ? value.message : undefined
+  };
+}
+
+// Account command DTOs are metadata-only; secrets are submitted but never returned.
 export async function accountList(providerId?: string): Promise<AccountDto[]> {
   const response = await invoke<unknown[]>("account_list", { providerId });
   return response.map(toAccountDto);
@@ -88,6 +125,11 @@ export async function accountCreateApiKey(input: AccountCreateInput): Promise<Ac
 
 export async function accountDisconnect(accountId: string): Promise<void> {
   await invoke("account_disconnect", { accountId });
+}
+
+export async function oauthStart(providerId: string): Promise<OAuthStartResult> {
+  const response = await invoke<unknown>("oauth_start", { providerId });
+  return toOAuthStartResult(response);
 }
 
 export async function providerList(): Promise<ProviderDto[]> {

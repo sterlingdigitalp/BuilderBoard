@@ -318,10 +318,11 @@ Adapters receive credentials through a `CredentialHandle`:
 
 ```text
 CredentialHandle {
+  provider_id: String,
   account_id: String,
   auth_type: oauth | api_key,
-  access_token: String,       // resolved by Credential Service
-  api_key: Option<String>,    // for api_key accounts
+  credential_ref: String,          // opaque Keychain reference
+  token_expires_at: Option<String> // OAuth expiry metadata, no token value
 }
 ```
 
@@ -332,6 +333,8 @@ Builder B adapters must not:
 - Store tokens in memory beyond request scope
 
 **Credential delivery pattern:** The `chat` boundary resolves `CredentialHandle`, then constructs the provider adapter with credentials bound at instantiation (e.g. `OpenAIProvider::with_credentials(handle)`). The `LLMProvider` trait methods (`send`, `stream`, `list_models`) remain unchanged; credentials are not fields on `ProviderRequest`.
+
+Phase 3B credential integration ensures explicit and default OAuth accounts resolve through the same `Provider -> Account -> CredentialHandle -> LLMProvider` path as API-key accounts. Expired OAuth account rows or expired `token_expires_at` metadata return structured `expired_account` errors before any provider execution.
 
 ## Migration / Schema Compatibility
 

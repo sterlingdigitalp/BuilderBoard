@@ -1,6 +1,6 @@
 # Provider Model
 
-The provider model defines a stable abstraction for future LLM integrations. Phase 3A resolves provider stubs with account credential handles without implementing real API behavior.
+The provider model defines a stable abstraction for future LLM integrations. Phase 3B resolves provider stubs with API-key or OAuth credential handles without implementing real provider API behavior.
 
 ## Core Trait
 
@@ -32,7 +32,7 @@ Provider registry rows are loaded from SQLite via the storage provider repositor
 | `openai` | `OpenAIProvider` |
 | `google` | `GoogleProvider` |
 
-The Phase 3A resolver intentionally rejects non-MVP providers including `openrouter`, `ollama`, and `lmstudio`. Unsupported rows return a structured `ProviderResolutionError` with code `unsupported_provider`, preserving the provider id and provider type for callers.
+The Phase 3B resolver intentionally rejects non-MVP providers including `openrouter`, `ollama`, and `lmstudio`. Unsupported rows return a structured `ProviderResolutionError` with code `unsupported_provider`, preserving the provider id and provider type for callers.
 
 `provider_list` returns enabled registry rows for UI selection. It does not instantiate providers or call provider APIs.
 
@@ -42,10 +42,11 @@ Account-aware resolution follows this order:
 2. Use `pane.account_id` if present.
 3. Otherwise use `AccountRepository::get_default_for_provider`.
 4. Reject missing accounts with `no_account`.
-5. Reject non-active accounts with `inactive_account`.
-6. Create a `CredentialHandle` from account metadata and return it with the selected `LLMProvider` stub.
+5. Reject expired accounts with `expired_account`.
+6. Reject other non-active accounts with `inactive_account`.
+7. Create a `CredentialHandle` from account metadata and return it with the selected `LLMProvider` stub.
 
-`CredentialHandle` carries only account metadata and the opaque `credential_ref`; provider stubs still do not receive raw API keys or OAuth tokens.
+`CredentialHandle` carries account metadata, `auth_type`, the opaque `credential_ref`, and optional OAuth expiry metadata. Provider stubs still do not receive raw API keys or OAuth tokens.
 
 ## Shared Types
 
@@ -56,7 +57,7 @@ Account-aware resolution follows this order:
 - `ProviderRequest`: Wrapper for provider input.
 - `ProviderResponse`: Normalized provider output.
 - `StreamChunk`: Normalized streaming delta placeholder.
-- `ProviderResolutionError`: Structured resolver error for unsupported, missing, or storage-backed provider resolution failures.
+- `ProviderResolutionError`: Structured resolver error for unsupported, missing, inactive, expired, or storage-backed provider resolution failures.
 - `ResolvedProvider`: Provider stub plus `CredentialHandle` returned by account-aware resolution.
 
 ## Boundary Rules
@@ -66,4 +67,4 @@ Account-aware resolution follows this order:
 - Authentication and token storage remain outside provider implementations; providers receive only the resolved credential handle at construction/resolution boundaries.
 - Provider code must not directly persist conversations; persistence belongs to the `storage` boundary.
 - Streaming must return normalized `StreamChunk` values rather than provider-native events.
-- Registry and account resolution must not add networking, OAuth, streaming, or model execution.
+- Registry and account resolution must not add provider API networking, streaming, or model execution.

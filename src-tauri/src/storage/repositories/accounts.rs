@@ -7,6 +7,7 @@ use crate::storage::models::{AccountDto, AccountStatusDto};
 use crate::storage::repositories::providers::ProviderRepository;
 
 pub const API_KEY_SUPPORTED_PROVIDERS: &[&str] = &["openai", "anthropic", "google"];
+pub const OAUTH_SUPPORTED_PROVIDERS: &[&str] = &["google"];
 
 pub struct AccountRepository;
 
@@ -25,6 +26,119 @@ impl AccountRepository {
             )));
         }
 
+        Ok(())
+    }
+
+    pub fn validate_oauth_provider(connection: &Connection, provider_id: &str) -> StorageResult<()> {
+        if !OAUTH_SUPPORTED_PROVIDERS.contains(&provider_id) {
+            return Err(StorageError::InvalidInput(format!(
+                "provider {provider_id} does not support OAuth in Phase 3B"
+            )));
+        }
+
+        let provider = ProviderRepository::get_enabled_by_id(connection, provider_id)?;
+        if provider.auth_mode != "oauth" {
+            return Err(StorageError::InvalidInput(format!(
+                "provider {provider_id} is not configured for oauth"
+            )));
+        }
+
+        Ok(())
+    }
+
+    pub fn create_oauth_account(
+        connection: &Connection,
+        provider_id: &str,
+        label: &str,
+        credential_ref: &str,
+        external_account_id: &str,
+        external_email: Option<&str>,
+        token_expires_at: &str,
+        scopes: Option<&str>,
+        set_as_default: bool,
+    ) -> StorageResult<AccountDto> {
+        Self::validate_oauth_provider(connection, provider_id)?;
+
+        if label.trim().is_empty() {
+            return Err(StorageError::InvalidInput(
+                "account label must not be empty".to_string(),
+            ));
+        }
+
+        let now = Utc::now().to_rfc3339();
+        let account_id = Uuid::new_v4().to_string();
+        let should_default =
+            set_as_default || !Self::provider_has_active_default(connection, provider_id)?;
+        let scopes_json = scopes.map(|value| {
+            serde_json::to_string(
+                &value
+                    .split_whitespace()
+                    .map(str::to_string)
+                    .collect::<Vec<_>>(),
+            )
+            .unwrap_or_else(|_| "[]".to_string())
+        });
+
+        connection.execute(
+            "INSERT INTO accounts (
+                id, provider_id, label, auth_type, credential_ref, external_account_id,
+                external_email, token_expires_at, scopes_json, status,
+                is_default, created_at, updated_at
+             ) VALUES (?1, ?2, ?3, 'oauth', ?4, ?5, ?6, ?7, ?8, 'active', ?9, ?10, ?11)",
+            (
+                &account_id,
+                provider_id,
+                label,
+                credential_ref,
+                external_account_id,
+                external_email,
+                token_expires_at,
+                scopes_json,
+                i64::from(should_default),
+                &now,
+                &now,
+            ),
+        )?;
+
+        if should_default {
+            Self::set_default(connection, &account_id)?;
+        }
+
+        Self::get_by_id(connection, &account_id)
+    }
+
+    pub fn update_oauth_token_metadata(
+        connection: &Connection,
+        account_id: &str,
+        token_expires_at: &str,
+        scopes: Option<&str>,
+    ) -> StorageResult<()> {
+        let now = Utc::now().to_rfc3339();
+        let scopes_json = scopes.map(|value| {
+            serde_json::to_string(
+                &value
+                    .split_whitespace()
+                    .map(str::to_string)
+                    .collect::<Vec<_>>(),
+            )
+            .unwrap_or_else(|_| "[]".to_string())
+        });
+
+        connection.execute(
+            "UPDATE accounts
+             SET token_expires_at = ?1, scopes_json = COALESCE(?2, scopes_json), updated_at = ?3, status = 'active'
+             WHERE id = ?4",
+            (token_expires_at, scopes_json, &now, account_id),
+        )?;
+        Ok(())
+    }
+
+    pub fn mark_expired(connection: &Connection, account_id: &str) -> StorageResult<()> {
+        let now = Utc::now().to_rfc3339();
+        connection.execute(
+            "UPDATE accounts SET status = 'expired', updated_at = ?1 WHERE id = ?2",
+            (&now, account_id),
+        )?;
         Ok(())
     }
 

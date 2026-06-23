@@ -36,7 +36,7 @@ export function AccountCreateForm({ provider, isDisabled, onCreate }: AccountCre
   if (provider.authMode !== "api_key") {
     return (
       <div style={{ color: "var(--button-fg)", fontSize: "0.82rem" }}>
-        OAuth account connection is not part of Phase 3A UI.
+        API-key accounts are not available for this provider.
       </div>
     );
   }

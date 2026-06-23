@@ -105,6 +105,18 @@ impl ProviderResolutionError {
         }
     }
 
+    pub fn expired_account(provider_id: impl Into<String>, account_id: impl Into<String>) -> Self {
+        let provider_id = provider_id.into();
+        let account_id = account_id.into();
+        Self {
+            code: "expired_account".to_string(),
+            provider_id: Some(provider_id.clone()),
+            provider_type: None,
+            account_id: Some(account_id.clone()),
+            message: format!("account '{account_id}' for provider '{provider_id}' is expired"),
+        }
+    }
+
     pub fn unsupported_provider(provider_id: impl Into<String>, provider_type: impl Into<String>) -> Self {
         let provider_id = provider_id.into();
         let provider_type = provider_type.into();

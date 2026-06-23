@@ -1,11 +1,21 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
 import {
   accountCreateApiKey,
   accountDisconnect,
   accountList,
-  providerList
+  oauthStart,
+  providerList,
+  toAccountDto,
+  toOAuthCompleteEvent,
+  toOAuthErrorEvent
 } from "../stores/accountCommands";
-import type { AccountCreateInput, AccountDto, ProviderDto } from "../types/accounts";
+import type {
+  AccountCreateInput,
+  AccountDto,
+  OAuthConnectionStatus,
+  ProviderDto
+} from "../types/accounts";
 
 const supportedProviderIds = ["openai", "anthropic", "google"];
 
@@ -15,7 +25,10 @@ interface AccountsSettingsState {
   isLoading: boolean;
   isMutating: boolean;
   error: string | null;
+  oauthStatus: OAuthConnectionStatus;
+  oauthMessage: string | null;
   createApiKeyAccount: (input: AccountCreateInput) => Promise<void>;
+  connectGoogleOAuth: () => Promise<void>;
   disconnectAccount: (accountId: string) => Promise<void>;
   reloadAccounts: () => Promise<void>;
 }
@@ -50,6 +63,8 @@ export function useAccountsSettings(): AccountsSettingsState {
   const [isLoading, setIsLoading] = useState(true);
   const [isMutating, setIsMutating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [oauthStatus, setOAuthStatus] = useState<OAuthConnectionStatus>("idle");
+  const [oauthMessage, setOAuthMessage] = useState<string | null>(null);
 
   const visibleProviders = useMemo(() => supportedProviders(providers), [providers]);
 
@@ -93,6 +108,24 @@ export function useAccountsSettings(): AccountsSettingsState {
     }
   }, []);
 
+  const connectGoogleOAuth = useCallback(async () => {
+    setIsMutating(true);
+    setError(null);
+    setOAuthStatus("starting");
+    setOAuthMessage("Opening Google sign-in.");
+
+    try {
+      await oauthStart("google");
+      setOAuthStatus("waiting");
+      setOAuthMessage("Waiting for Google authorization to complete.");
+    } catch (connectError) {
+      setOAuthStatus("error");
+      setOAuthMessage(errorMessage(connectError));
+    } finally {
+      setIsMutating(false);
+    }
+  }, []);
+
   const disconnectAccount = useCallback(async (accountId: string) => {
     setIsMutating(true);
     setError(null);
@@ -117,13 +150,77 @@ export function useAccountsSettings(): AccountsSettingsState {
     void reloadAccounts();
   }, [reloadAccounts]);
 
+  useEffect(() => {
+    let isActive = true;
+    const cleanupFns: Array<() => void> = [];
+
+    async function bindOAuthEvents() {
+      cleanupFns.push(
+        await listen("oauth_complete", (event) => {
+          const payload = toOAuthCompleteEvent(event.payload);
+
+          if (!payload || payload.providerId !== "google" || !isActive) {
+            return;
+          }
+
+          setOAuthStatus("connected");
+          setOAuthMessage("Google account connected.");
+          void reloadAccounts();
+        })
+      );
+
+      cleanupFns.push(
+        await listen("oauth_error", (event) => {
+          const payload = toOAuthErrorEvent(event.payload);
+
+          if (!payload || payload.providerId !== "google" || !isActive) {
+            return;
+          }
+
+          setOAuthStatus("error");
+          setOAuthMessage(payload.message ?? payload.errorCode ?? "Google OAuth failed.");
+        })
+      );
+
+      cleanupFns.push(
+        await listen("account_created", (event) => {
+          const account = toAccountDto(event.payload);
+
+          if (account.providerId !== "google" || !isActive) {
+            return;
+          }
+
+          void reloadAccounts();
+        })
+      );
+
+      cleanupFns.push(
+        await listen("account_status_changed", () => {
+          if (isActive) {
+            void reloadAccounts();
+          }
+        })
+      );
+    }
+
+    void bindOAuthEvents();
+
+    return () => {
+      isActive = false;
+      cleanupFns.forEach((cleanup) => cleanup());
+    };
+  }, [reloadAccounts]);
+
   return {
     accounts,
     providers: visibleProviders,
     isLoading,
     isMutating,
     error,
+    oauthStatus,
+    oauthMessage,
     createApiKeyAccount,
+    connectGoogleOAuth,
     disconnectAccount,
     reloadAccounts
   };

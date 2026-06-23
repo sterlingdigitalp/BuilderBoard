@@ -1,3 +1,4 @@
+use chrono::Utc;
 use rusqlite::Connection;
 
 use crate::auth::CredentialHandle;
@@ -63,12 +64,30 @@ impl ProviderResolutionService {
             ));
         }
 
+        if account.status == "expired" {
+            return Err(ProviderResolutionError::expired_account(
+                provider_id,
+                account.id,
+            ));
+        }
+
         if account.status != "active" {
             return Err(ProviderResolutionError::inactive_account(
                 provider_id,
                 account.id,
                 account.status,
             ));
+        }
+
+        if account.auth_type == "oauth" {
+            if let Some(expires_at) = account.token_expires_at.as_deref() {
+                if is_expired(expires_at) {
+                    return Err(ProviderResolutionError::expired_account(
+                        provider_id,
+                        account.id,
+                    ));
+                }
+            }
         }
 
         let credential_ref = AccountRepository::credential_ref(connection, &account.id)
@@ -79,8 +98,15 @@ impl ProviderResolutionService {
             account.id,
             account.auth_type,
             credential_ref,
+            account.token_expires_at,
         ))
     }
+}
+
+fn is_expired(expires_at: &str) -> bool {
+    chrono::DateTime::parse_from_rfc3339(expires_at)
+        .map(|expires_at| expires_at.with_timezone(&Utc) <= Utc::now())
+        .unwrap_or(false)
 }
 
 #[cfg(test)]
@@ -138,6 +164,25 @@ mod tests {
         assert_eq!(resolved.provider.list_models().unwrap(), vec![Model::GoogleGemini]);
         assert_eq!(resolved.credential.account_id, "google-account");
         assert_eq!(resolved.credential.auth_type, "oauth");
+        assert!(resolved.credential.is_oauth());
+        Ok(())
+    }
+
+    #[test]
+    fn resolves_google_default_oauth_account() -> StorageResult<()> {
+        let conn = rusqlite::Connection::open_in_memory()?;
+        conn.execute_batch(crate::storage::migrations::MIGRATIONS_FOR_TEST)?;
+        AccountRepository::insert_test_account(&conn, "default-google", "google", "oauth", "active", true)?;
+        set_token_expires_at(&conn, "default-google", "2099-01-01T00:00:00Z")?;
+        let pane = create_bound_pane(&conn, "google", None)?;
+
+        let resolved = ProviderResolutionService::resolve_for_pane(&conn, &pane.id)
+            .expect("google default OAuth account should resolve");
+
+        assert_eq!(resolved.provider.list_models().unwrap(), vec![Model::GoogleGemini]);
+        assert_eq!(resolved.credential.account_id, "default-google");
+        assert_eq!(resolved.credential.auth_type, "oauth");
+        assert_eq!(resolved.credential.token_expires_at.as_deref(), Some("2099-01-01T00:00:00Z"));
         Ok(())
     }
 
@@ -160,8 +205,8 @@ mod tests {
     fn inactive_account_is_rejected() -> StorageResult<()> {
         let conn = rusqlite::Connection::open_in_memory()?;
         conn.execute_batch(crate::storage::migrations::MIGRATIONS_FOR_TEST)?;
-        AccountRepository::insert_test_account(&conn, "expired-openai", "openai", "api_key", "expired", true)?;
-        let pane = create_bound_pane(&conn, "openai", Some("expired-openai"))?;
+        AccountRepository::insert_test_account(&conn, "revoked-openai", "openai", "api_key", "revoked", true)?;
+        let pane = create_bound_pane(&conn, "openai", Some("revoked-openai"))?;
 
         let error = match ProviderResolutionService::resolve_for_pane(&conn, &pane.id) {
             Ok(_) => panic!("inactive account should not resolve"),
@@ -169,7 +214,42 @@ mod tests {
         };
 
         assert_eq!(error.code, "inactive_account");
-        assert_eq!(error.account_id.as_deref(), Some("expired-openai"));
+        assert_eq!(error.account_id.as_deref(), Some("revoked-openai"));
+        Ok(())
+    }
+
+    #[test]
+    fn expired_account_status_is_rejected() -> StorageResult<()> {
+        let conn = rusqlite::Connection::open_in_memory()?;
+        conn.execute_batch(crate::storage::migrations::MIGRATIONS_FOR_TEST)?;
+        AccountRepository::insert_test_account(&conn, "expired-google", "google", "oauth", "expired", true)?;
+        let pane = create_bound_pane(&conn, "google", Some("expired-google"))?;
+
+        let error = match ProviderResolutionService::resolve_for_pane(&conn, &pane.id) {
+            Ok(_) => panic!("expired account should not resolve"),
+            Err(error) => error,
+        };
+
+        assert_eq!(error.code, "expired_account");
+        assert_eq!(error.account_id.as_deref(), Some("expired-google"));
+        Ok(())
+    }
+
+    #[test]
+    fn expired_oauth_token_is_rejected() -> StorageResult<()> {
+        let conn = rusqlite::Connection::open_in_memory()?;
+        conn.execute_batch(crate::storage::migrations::MIGRATIONS_FOR_TEST)?;
+        AccountRepository::insert_test_account(&conn, "past-google", "google", "oauth", "active", true)?;
+        set_token_expires_at(&conn, "past-google", "2000-01-01T00:00:00Z")?;
+        let pane = create_bound_pane(&conn, "google", Some("past-google"))?;
+
+        let error = match ProviderResolutionService::resolve_for_pane(&conn, &pane.id) {
+            Ok(_) => panic!("expired OAuth token should not resolve"),
+            Err(error) => error,
+        };
+
+        assert_eq!(error.code, "expired_account");
+        assert_eq!(error.account_id.as_deref(), Some("past-google"));
         Ok(())
     }
 
@@ -271,5 +351,17 @@ mod tests {
         )?;
         conn.execute_batch("PRAGMA foreign_keys = ON;")?;
         PaneRepository::get_open_by_id(conn, &pane.id)
+    }
+
+    fn set_token_expires_at(
+        conn: &rusqlite::Connection,
+        account_id: &str,
+        token_expires_at: &str,
+    ) -> StorageResult<()> {
+        conn.execute(
+            "UPDATE accounts SET token_expires_at = ?1 WHERE id = ?2",
+            (token_expires_at, account_id),
+        )?;
+        Ok(())
     }
 }

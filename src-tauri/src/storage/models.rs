@@ -106,6 +106,28 @@ pub struct AccountStatusDto {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct OAuthStartResult {
+    pub auth_url: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OAuthCompleteEvent {
+    pub account_id: String,
+    pub provider_id: String,
+    pub label: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OAuthErrorEvent {
+    pub provider_id: String,
+    pub error_code: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AppendMessageRequest {
     pub pane_id: String,
     pub role: String,

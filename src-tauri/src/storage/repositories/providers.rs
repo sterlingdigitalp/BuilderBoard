@@ -1,7 +1,17 @@
 use rusqlite::{Connection, OptionalExtension};
+use serde::Deserialize;
 
 use crate::storage::error::{StorageError, StorageResult};
 use crate::storage::models::ProviderDto;
+
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+pub struct OAuthProviderConfig {
+    pub authorization_url: String,
+    pub token_url: String,
+    pub revocation_url: String,
+    pub scopes: Vec<String>,
+    pub userinfo_url: String,
+}
 
 pub struct ProviderRepository;
 
@@ -26,6 +36,27 @@ impl ProviderRepository {
     pub fn count(connection: &Connection) -> StorageResult<i64> {
         let count: i64 = connection.query_row("SELECT COUNT(*) FROM providers", [], |row| row.get(0))?;
         Ok(count)
+    }
+
+    pub fn get_oauth_config(connection: &Connection, provider_id: &str) -> StorageResult<OAuthProviderConfig> {
+        let raw: Option<String> = connection
+            .query_row(
+                "SELECT oauth_config_json FROM providers WHERE id = ?1 AND enabled = 1",
+                [provider_id],
+                |row| row.get(0),
+            )
+            .optional()?
+            .flatten();
+
+        let Some(raw) = raw else {
+            return Err(StorageError::InvalidInput(format!(
+                "provider {provider_id} has no oauth configuration"
+            )));
+        };
+
+        serde_json::from_str(&raw).map_err(|err| {
+            StorageError::InvalidInput(format!("invalid oauth_config_json for {provider_id}: {err}"))
+        })
     }
 
     pub fn get_enabled_by_id(connection: &Connection, provider_id: &str) -> StorageResult<ProviderDto> {
@@ -98,11 +129,25 @@ mod tests {
     #[test]
     fn gets_enabled_provider_by_id() -> StorageResult<()> {
         let conn = rusqlite::Connection::open_in_memory()?;
-        conn.execute_batch(crate::storage::migrations::MIGRATION_0001_FOR_TEST)?;
+        conn.execute_batch(crate::storage::migrations::MIGRATIONS_FOR_TEST)?;
 
         let provider = ProviderRepository::get_enabled_by_id(&conn, "openai")?;
 
         assert_eq!(provider.provider_type, "openai");
+        Ok(())
+    }
+
+    #[test]
+    fn google_oauth_config_is_seeded() -> StorageResult<()> {
+        let conn = rusqlite::Connection::open_in_memory()?;
+        conn.execute_batch(crate::storage::migrations::MIGRATIONS_FOR_TEST)?;
+
+        let config = ProviderRepository::get_oauth_config(&conn, "google")?;
+        assert_eq!(
+            config.authorization_url,
+            "https://accounts.google.com/o/oauth2/v2/auth"
+        );
+        assert!(config.scopes.contains(&"openid".to_string()));
         Ok(())
     }
 }

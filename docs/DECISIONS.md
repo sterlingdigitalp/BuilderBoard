@@ -140,3 +140,55 @@ Pane resolution needs a stable default account per provider
 
 Status:
 Accepted
+
+---
+
+### Phase 3B Google OAuth Client ID
+
+Decision:
+Load `client_id` from `BUILDERBOARD_GOOGLE_CLIENT_ID` env var (dev); no client secret (PKCE public client)
+
+Reason:
+Desktop-safe OAuth per OAUTH_DESIGN; secrets not embedded in distributed binary
+
+Status:
+Accepted
+
+---
+
+### Phase 3B Loopback Callback
+
+Decision:
+Bind ephemeral port on `127.0.0.1` only; 5-minute timeout; one pending session per provider
+
+Reason:
+RFC 8252 compliant; localhost-only reduces hijack surface
+
+Status:
+Accepted
+
+---
+
+### Phase 3B System Browser
+
+Decision:
+Open authorization URL via macOS `open` command (no Tauri opener plugin)
+
+Reason:
+Avoid embedded WebView credential phishing; system browser is security requirement
+
+Status:
+Accepted
+
+---
+
+### Phase 3B OAuth Credential Resolution
+
+Decision:
+Resolve OAuth accounts using the same `CredentialHandle` path as API-key accounts
+
+Reason:
+Provider adapters need one account resolution contract while `LLMProvider` remains unchanged
+
+Status:
+Accepted

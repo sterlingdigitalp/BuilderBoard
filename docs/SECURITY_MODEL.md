@@ -117,7 +117,7 @@ Per [PROVIDER_MODEL.md](./PROVIDER_MODEL.md), provider implementations normalize
 
 | Allowed | Prohibited |
 |---------|------------|
-| Receive credentials at adapter construction (Phase 3+; `chat` resolves CredentialHandle, binds to adapter instance before `send`/`stream`) | Persist credentials across requests |
+| Receive opaque credential handles at adapter construction (Phase 3+; `chat` resolves CredentialHandle, binds to adapter instance before `send`/`stream`) | Persist raw credentials across requests |
 | Make HTTPS calls to provider APIs (Phase 4) | Log request headers containing auth |
 | Return normalized `StreamChunk` / `ProviderResponse` | Write credentials to SQLite |
 | Report `ProviderError` (sanitized) | Execute shell commands from provider responses |
@@ -182,7 +182,7 @@ No sandbox (not Mac App Store). User's home directory access is limited to app d
 |-------|------------|
 | `model_id` | Alphanumeric + `.` `-` `_`, max 128 chars |
 | `provider_id` | Must exist in `providers` table |
-| `account_id` | Must exist, `status = active`, match pane's `provider_id` |
+| `account_id` | Must exist, `status = active`, match pane's `provider_id`, and not be expired for OAuth |
 
 ## Provider Switching Security
 

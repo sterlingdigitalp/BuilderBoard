@@ -14,6 +14,24 @@ export interface AccountDto {
   isDefault: boolean;
 }
 
+export type OAuthConnectionStatus = "idle" | "starting" | "waiting" | "connected" | "error";
+
+export interface OAuthStartResult {
+  authUrl: string | null;
+}
+
+export interface OAuthCompleteEvent {
+  accountId: string;
+  providerId: string;
+  label?: string;
+}
+
+export interface OAuthErrorEvent {
+  providerId: string;
+  errorCode?: string;
+  message?: string;
+}
+
 export interface ProviderDto {
   id: string;
   providerType: string;

@@ -189,8 +189,7 @@ Stored in `providers.oauth_config_json` (public metadata only):
   "revocation_url": "https://oauth2.googleapis.com/revoke",
   "scopes": [
     "openid",
-    "email",
-    "https://www.googleapis.com/auth/generative-language"
+    "email"
   ],
   "userinfo_url": "https://www.googleapis.com/oauth2/v3/userinfo"
 }
@@ -202,6 +201,8 @@ Stored in `providers.oauth_config_json` (public metadata only):
 2. Build-time embedded config (production)
 
 No `client_secret` — PKCE public client model.
+
+Phase 3B requests identity scopes only (`openid`, `email`). The scope `https://www.googleapis.com/auth/generative-language` is not a valid Google OAuth scope and causes `invalid_scope` errors. Gemini API access scopes (`cloud-platform`, `generative-language.retriever`) are deferred to Phase 4 provider execution.
 
 ### Future Provider Template
 

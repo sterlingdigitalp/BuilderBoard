@@ -182,6 +182,19 @@ Accepted
 
 ---
 
+### Phase 3B Google OAuth Scopes
+
+Decision:
+Request `openid` and `email` only for account linking; omit Gemini API scopes
+
+Reason:
+`https://www.googleapis.com/auth/generative-language` is not a valid Google OAuth scope (returns `invalid_scope`). Valid Gemini scopes (`cloud-platform`, `generative-language.retriever`) are for API access, not identity, and belong in Phase 4
+
+Status:
+Accepted
+
+---
+
 ### Phase 3B OAuth Credential Resolution
 
 Decision:

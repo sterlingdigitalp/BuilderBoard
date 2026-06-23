@@ -147,7 +147,11 @@ mod tests {
             config.authorization_url,
             "https://accounts.google.com/o/oauth2/v2/auth"
         );
-        assert!(config.scopes.contains(&"openid".to_string()));
+        assert_eq!(config.scopes, vec!["openid".to_string(), "email".to_string()]);
+        assert!(!config
+            .scopes
+            .iter()
+            .any(|scope| scope.contains("generative-language")));
         Ok(())
     }
 }

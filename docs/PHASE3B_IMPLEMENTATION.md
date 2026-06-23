@@ -7,7 +7,7 @@
 
 | Component | Path | Description |
 |-----------|------|-------------|
-| Google OAuth config migration | `migrations/0003_google_oauth_config.sql` | Seeds `oauth_config_json` for Google provider |
+| Google OAuth config migration | `migrations/0003_google_oauth_config.sql`, `0004_google_oauth_scopes_fix.sql` | Seeds `oauth_config_json`; scopes `openid` + `email` only |
 | OAuth service | `src-tauri/src/auth/oauth_service.rs` | PKCE, loopback server, token exchange, userinfo, refresh |
 | OAuth commands | `src-tauri/src/auth/commands.rs` | `oauth_start`, `oauth_cancel` |
 | Credential extensions | `src-tauri/src/auth/credential_service.rs` | OAuth token payload storage in Keychain |

@@ -1,4 +1,5 @@
--- Phase 3B: Google OAuth provider configuration (public metadata only)
+-- Phase 3B fix: remove invalid generative-language scope from Google OAuth config.
+-- Account identity requires openid + email only; Gemini API scopes deferred to Phase 4.
 UPDATE providers
 SET oauth_config_json = '{
   "authorization_url": "https://accounts.google.com/o/oauth2/v2/auth",

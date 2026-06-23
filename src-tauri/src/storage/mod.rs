@@ -40,6 +40,7 @@ pub fn run() -> tauri::Result<()> {
             commands::message_stream_update,
             commands::message_complete,
             commands::message_error,
+            commands::stream_chat,
             commands::account_create_api_key,
             commands::account_list,
             commands::account_disconnect,

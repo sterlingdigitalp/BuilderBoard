@@ -13,7 +13,8 @@ impl PaneRepository {
         connection: &Connection,
         workspace_id: Option<&str>,
     ) -> StorageResult<Vec<PaneDto>> {
-        let resolved_workspace_id = WorkspaceRepository::resolve_workspace_id(connection, workspace_id)?;
+        let resolved_workspace_id =
+            WorkspaceRepository::resolve_workspace_id(connection, workspace_id)?;
 
         let mut statement = connection.prepare(
             "SELECT id, workspace_id, title, role_label, sort_order, width_ratio, height_ratio,
@@ -58,14 +59,7 @@ impl PaneRepository {
             "INSERT INTO panes (
                 id, workspace_id, title, sort_order, status, created_at, updated_at
              ) VALUES (?1, ?2, ?3, ?4, 'idle', ?5, ?6)",
-            (
-                &pane_id,
-                &workspace_id,
-                &title,
-                next_sort_order,
-                &now,
-                &now,
-            ),
+            (&pane_id, &workspace_id, &title, next_sort_order, &now, &now),
         )?;
 
         Self::get_by_id(connection, &pane_id)
@@ -81,7 +75,9 @@ impl PaneRepository {
         )?;
 
         if updated == 0 {
-            return Err(StorageError::NotFound(format!("open pane {pane_id} not found")));
+            return Err(StorageError::NotFound(format!(
+                "open pane {pane_id} not found"
+            )));
         }
 
         Ok(())

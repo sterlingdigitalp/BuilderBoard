@@ -34,11 +34,15 @@ impl ProviderRepository {
     }
 
     pub fn count(connection: &Connection) -> StorageResult<i64> {
-        let count: i64 = connection.query_row("SELECT COUNT(*) FROM providers", [], |row| row.get(0))?;
+        let count: i64 =
+            connection.query_row("SELECT COUNT(*) FROM providers", [], |row| row.get(0))?;
         Ok(count)
     }
 
-    pub fn get_oauth_config(connection: &Connection, provider_id: &str) -> StorageResult<OAuthProviderConfig> {
+    pub fn get_oauth_config(
+        connection: &Connection,
+        provider_id: &str,
+    ) -> StorageResult<OAuthProviderConfig> {
         let raw: Option<String> = connection
             .query_row(
                 "SELECT oauth_config_json FROM providers WHERE id = ?1 AND enabled = 1",
@@ -55,11 +59,16 @@ impl ProviderRepository {
         };
 
         serde_json::from_str(&raw).map_err(|err| {
-            StorageError::InvalidInput(format!("invalid oauth_config_json for {provider_id}: {err}"))
+            StorageError::InvalidInput(format!(
+                "invalid oauth_config_json for {provider_id}: {err}"
+            ))
         })
     }
 
-    pub fn get_enabled_by_id(connection: &Connection, provider_id: &str) -> StorageResult<ProviderDto> {
+    pub fn get_enabled_by_id(
+        connection: &Connection,
+        provider_id: &str,
+    ) -> StorageResult<ProviderDto> {
         connection
             .query_row(
                 "SELECT id, provider_type, display_name, enabled, auth_mode,
@@ -71,7 +80,9 @@ impl ProviderRepository {
                 map_provider_row,
             )
             .optional()?
-            .ok_or_else(|| StorageError::NotFound(format!("enabled provider {provider_id} not found")))
+            .ok_or_else(|| {
+                StorageError::NotFound(format!("enabled provider {provider_id} not found"))
+            })
     }
 
     #[cfg(test)]
@@ -119,7 +130,10 @@ mod tests {
         conn.execute_batch(crate::storage::migrations::MIGRATION_0001_FOR_TEST)?;
         let providers = ProviderRepository::list_enabled(&conn)?;
         assert_eq!(providers.len(), 3);
-        let ids: Vec<_> = providers.iter().map(|provider| provider.id.as_str()).collect();
+        let ids: Vec<_> = providers
+            .iter()
+            .map(|provider| provider.id.as_str())
+            .collect();
         assert!(ids.contains(&"anthropic"));
         assert!(ids.contains(&"openai"));
         assert!(ids.contains(&"google"));
@@ -147,7 +161,10 @@ mod tests {
             config.authorization_url,
             "https://accounts.google.com/o/oauth2/v2/auth"
         );
-        assert_eq!(config.scopes, vec!["openid".to_string(), "email".to_string()]);
+        assert_eq!(
+            config.scopes,
+            vec!["openid".to_string(), "email".to_string()]
+        );
         assert!(!config
             .scopes
             .iter()

@@ -3,8 +3,8 @@ pub mod credential_service;
 pub mod oauth_service;
 
 pub use credential_service::{
-    ApiKeyCredential, CredentialPayload, CredentialService, CredentialStore, KeychainCredentialStore,
-    MemoryCredentialStore, OAuthCredential, KEYCHAIN_SERVICE,
+    ApiKeyCredential, CredentialPayload, CredentialService, CredentialStore,
+    KeychainCredentialStore, MemoryCredentialStore, OAuthCredential, KEYCHAIN_SERVICE,
 };
 pub use oauth_service::OAuthService;
 

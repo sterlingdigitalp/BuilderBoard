@@ -12,7 +12,10 @@ pub const OAUTH_SUPPORTED_PROVIDERS: &[&str] = &["google"];
 pub struct AccountRepository;
 
 impl AccountRepository {
-    pub fn validate_api_key_provider(connection: &Connection, provider_id: &str) -> StorageResult<()> {
+    pub fn validate_api_key_provider(
+        connection: &Connection,
+        provider_id: &str,
+    ) -> StorageResult<()> {
         if !API_KEY_SUPPORTED_PROVIDERS.contains(&provider_id) {
             return Err(StorageError::InvalidInput(format!(
                 "provider {provider_id} does not support API-key accounts in Phase 3A"
@@ -29,7 +32,10 @@ impl AccountRepository {
         Ok(())
     }
 
-    pub fn validate_oauth_provider(connection: &Connection, provider_id: &str) -> StorageResult<()> {
+    pub fn validate_oauth_provider(
+        connection: &Connection,
+        provider_id: &str,
+    ) -> StorageResult<()> {
         if !OAUTH_SUPPORTED_PROVIDERS.contains(&provider_id) {
             return Err(StorageError::InvalidInput(format!(
                 "provider {provider_id} does not support OAuth in Phase 3B"
@@ -257,7 +263,10 @@ impl AccountRepository {
             .map_err(StorageError::from)
     }
 
-    pub fn get_status(connection: &Connection, account_id: &str) -> StorageResult<AccountStatusDto> {
+    pub fn get_status(
+        connection: &Connection,
+        account_id: &str,
+    ) -> StorageResult<AccountStatusDto> {
         let account = Self::get_by_id(connection, account_id)?;
         Ok(AccountStatusDto {
             account_id: account.id,
@@ -486,7 +495,9 @@ mod tests {
     #[test]
     fn default_account_selects_active_default_for_provider() -> StorageResult<()> {
         let conn = setup_connection();
-        AccountRepository::insert_test_account(&conn, "openai-1", "openai", "api_key", "active", true)?;
+        AccountRepository::insert_test_account(
+            &conn, "openai-1", "openai", "api_key", "active", true,
+        )?;
 
         let account = AccountRepository::get_default_for_provider(&conn, "openai")?
             .expect("default account should exist");

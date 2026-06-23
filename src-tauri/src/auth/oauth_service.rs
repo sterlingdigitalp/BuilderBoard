@@ -34,10 +34,7 @@ pub(crate) fn oauth_log(message: impl AsRef<str>) {
 }
 
 fn oauth_log_response(stage: &str, status: u16, body: &str) {
-    oauth_log(format!(
-        "{stage}: {status} {}",
-        truncate_for_log(body, 240)
-    ));
+    oauth_log(format!("{stage}: {status} {}", truncate_for_log(body, 240)));
 }
 
 fn truncate_for_log(value: &str, max_len: usize) -> String {
@@ -135,7 +132,11 @@ pub trait OAuthHttpClient: Send + Sync {
         refresh_token: &str,
     ) -> StorageResult<TokenResponse>;
 
-    fn fetch_userinfo(&self, userinfo_url: &str, access_token: &str) -> StorageResult<UserInfoResponse>;
+    fn fetch_userinfo(
+        &self,
+        userinfo_url: &str,
+        access_token: &str,
+    ) -> StorageResult<UserInfoResponse>;
 }
 
 pub trait SystemBrowser: Send + Sync {
@@ -193,12 +194,10 @@ impl OAuthHttpClient for ReqwestOAuthClient {
         }
 
         oauth_log(format!("Token exchange response: {}", status.as_u16()));
-        response
-            .json::<TokenResponse>()
-            .map_err(|err| {
-                oauth_log(format!("Token exchange parse failed: {err}"));
-                StorageError::InvalidInput(format!("invalid token response: {err}"))
-            })
+        response.json::<TokenResponse>().map_err(|err| {
+            oauth_log(format!("Token exchange parse failed: {err}"));
+            StorageError::InvalidInput(format!("invalid token response: {err}"))
+        })
     }
 
     fn refresh_token(
@@ -244,7 +243,11 @@ impl OAuthHttpClient for ReqwestOAuthClient {
             .map_err(|err| StorageError::InvalidInput(format!("invalid refresh response: {err}")))
     }
 
-    fn fetch_userinfo(&self, userinfo_url: &str, access_token: &str) -> StorageResult<UserInfoResponse> {
+    fn fetch_userinfo(
+        &self,
+        userinfo_url: &str,
+        access_token: &str,
+    ) -> StorageResult<UserInfoResponse> {
         let client = reqwest::blocking::Client::new();
         let response = client
             .get(userinfo_url)
@@ -267,12 +270,10 @@ impl OAuthHttpClient for ReqwestOAuthClient {
         }
 
         oauth_log(format!("Userinfo response: {}", status.as_u16()));
-        response
-            .json::<UserInfoResponse>()
-            .map_err(|err| {
-                oauth_log(format!("Userinfo parse failed: {err}"));
-                StorageError::InvalidInput(format!("invalid userinfo response: {err}"))
-            })
+        response.json::<UserInfoResponse>().map_err(|err| {
+            oauth_log(format!("Userinfo parse failed: {err}"));
+            StorageError::InvalidInput(format!("invalid userinfo response: {err}"))
+        })
     }
 }
 
@@ -301,7 +302,10 @@ struct PendingOAuthSession {
     cancel_flag: Arc<AtomicBool>,
 }
 
-pub struct OAuthService<H: OAuthHttpClient = ReqwestOAuthClient, B: SystemBrowser = MacSystemBrowser> {
+pub struct OAuthService<
+    H: OAuthHttpClient = ReqwestOAuthClient,
+    B: SystemBrowser = MacSystemBrowser,
+> {
     http: H,
     browser: B,
     google_credentials_resolver:
@@ -379,10 +383,9 @@ where
         };
 
         {
-            let mut pending = self
-                .pending
-                .lock()
-                .map_err(|_| StorageError::InvalidInput("oauth session lock poisoned".to_string()))?;
+            let mut pending = self.pending.lock().map_err(|_| {
+                StorageError::InvalidInput("oauth session lock poisoned".to_string())
+            })?;
             pending.insert(provider_id.to_string(), session);
         }
 
@@ -410,12 +413,7 @@ where
         let provider_id_owned = provider_id.to_string();
         thread::spawn(move || {
             let result = handle_loopback_callback(listener, &cancel_flag, |callback| {
-                service.complete_callback(
-                    &database,
-                    &credentials,
-                    &provider_id_owned,
-                    callback,
-                )
+                service.complete_callback(&database, &credentials, &provider_id_owned, callback)
             });
 
             match result {
@@ -487,12 +485,7 @@ where
             Some(&credential.refresh_token),
         )?;
 
-        credentials.store_oauth_credential(
-            &credential_ref,
-            &label,
-            &provider_id,
-            &updated,
-        )?;
+        credentials.store_oauth_credential(&credential_ref, &label, &provider_id, &updated)?;
 
         database.with_connection(|connection| {
             AccountRepository::update_oauth_token_metadata(
@@ -509,7 +502,9 @@ where
     fn cancel_pending(&self, provider_id: &str) {
         if let Ok(mut pending) = self.pending.lock() {
             if let Some(session) = pending.remove(provider_id) {
-                oauth_log(format!("Cancelling pending flow for provider {provider_id}"));
+                oauth_log(format!(
+                    "Cancelling pending flow for provider {provider_id}"
+                ));
                 session.cancel_flag.store(true, Ordering::SeqCst);
             }
         }
@@ -553,13 +548,12 @@ where
         oauth_log("Callback received");
 
         let session = {
-            let mut pending = self
-                .pending
-                .lock()
-                .map_err(|_| StorageError::InvalidInput("oauth session lock poisoned".to_string()))?;
-            pending.remove(provider_id).ok_or_else(|| {
-                StorageError::InvalidInput("oauth session not found".to_string())
-            })
+            let mut pending = self.pending.lock().map_err(|_| {
+                StorageError::InvalidInput("oauth session lock poisoned".to_string())
+            })?;
+            pending
+                .remove(provider_id)
+                .ok_or_else(|| StorageError::InvalidInput("oauth session not found".to_string()))
         };
 
         let session = match session {
@@ -572,7 +566,9 @@ where
 
         if callback.state != session.state {
             oauth_log("State mismatch");
-            return Err(StorageError::InvalidInput("oauth state mismatch".to_string()));
+            return Err(StorageError::InvalidInput(
+                "oauth state mismatch".to_string(),
+            ));
         }
         oauth_log("State validated");
         oauth_log(format!(
@@ -684,27 +680,32 @@ fn handle_loopback_callback<F>(
 where
     F: FnOnce(OAuthCallback) -> StorageResult<AccountDto>,
 {
-    listener
-        .set_nonblocking(true)
-        .map_err(StorageError::from)?;
+    listener.set_nonblocking(true).map_err(StorageError::from)?;
 
     let deadline = std::time::Instant::now() + OAUTH_CALLBACK_TIMEOUT;
 
     loop {
         if cancel_flag.load(Ordering::SeqCst) {
             oauth_log("Flow cancelled");
-            return Err(StorageError::InvalidInput("oauth flow cancelled".to_string()));
+            return Err(StorageError::InvalidInput(
+                "oauth flow cancelled".to_string(),
+            ));
         }
 
         if std::time::Instant::now() >= deadline {
             oauth_log("Flow timed out waiting for callback");
-            return Err(StorageError::InvalidInput("oauth flow timed out".to_string()));
+            return Err(StorageError::InvalidInput(
+                "oauth flow timed out".to_string(),
+            ));
         }
 
         match listener.accept() {
             Ok((mut stream, peer)) => {
                 if !peer.ip().is_loopback() {
-                    oauth_log(format!("Rejected non-loopback connection from {}", peer.ip()));
+                    oauth_log(format!(
+                        "Rejected non-loopback connection from {}",
+                        peer.ip()
+                    ));
                     continue;
                 }
 
@@ -752,7 +753,10 @@ fn read_oauth_callback(stream: &mut TcpStream) -> StorageResult<OAuthCallback> {
     let params = parse_query(query);
 
     if let Some(error) = params.get("error") {
-        let description = params.get("error_description").map(String::as_str).unwrap_or("");
+        let description = params
+            .get("error_description")
+            .map(String::as_str)
+            .unwrap_or("");
         oauth_log(format!(
             "Provider returned error in callback: {error} {description}"
         ));
@@ -985,15 +989,13 @@ mod tests {
                     "mock exchange requires client_secret".to_string(),
                 ));
             }
-            *self
-                .last_exchange
-                .lock()
-                .map_err(|_| StorageError::InvalidInput("mock exchange lock poisoned".to_string()))? =
-                Some((
-                    code.to_string(),
-                    code_verifier.to_string(),
-                    redirect_uri.to_string(),
-                ));
+            *self.last_exchange.lock().map_err(|_| {
+                StorageError::InvalidInput("mock exchange lock poisoned".to_string())
+            })? = Some((
+                code.to_string(),
+                code_verifier.to_string(),
+                redirect_uri.to_string(),
+            ));
             Ok(self.token_response.clone())
         }
 
@@ -1009,11 +1011,9 @@ mod tests {
                     "mock refresh requires client_secret".to_string(),
                 ));
             }
-            *self
-                .last_refresh
-                .lock()
-                .map_err(|_| StorageError::InvalidInput("mock refresh lock poisoned".to_string()))? =
-                Some(refresh_token.to_string());
+            *self.last_refresh.lock().map_err(|_| {
+                StorageError::InvalidInput("mock refresh lock poisoned".to_string())
+            })? = Some(refresh_token.to_string());
             Ok(self.refresh_response.clone())
         }
 
@@ -1023,7 +1023,9 @@ mod tests {
             access_token: &str,
         ) -> StorageResult<UserInfoResponse> {
             if access_token != self.token_response.access_token {
-                return Err(StorageError::InvalidInput("unexpected access token".to_string()));
+                return Err(StorageError::InvalidInput(
+                    "unexpected access token".to_string(),
+                ));
             }
             Ok(self.userinfo_response.clone())
         }
@@ -1033,7 +1035,11 @@ mod tests {
         name: &str,
         http: MockHttpClient,
         browser: MockBrowser,
-    ) -> StorageResult<(Arc<Database>, Arc<CredentialService>, OAuthService<MockHttpClient, MockBrowser>)> {
+    ) -> StorageResult<(
+        Arc<Database>,
+        Arc<CredentialService>,
+        OAuthService<MockHttpClient, MockBrowser>,
+    )> {
         let path = test_database_path(name)?;
         let _ = fs::remove_file(&path);
         let database = Arc::new(Database::initialize_at(path)?);
@@ -1067,16 +1073,18 @@ mod tests {
 
     fn send_callback(redirect_uri: &str, code: &str, state: &str) -> StorageResult<()> {
         let path = format!("/callback?code={code}&state={state}");
-        let request = format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
-        let mut stream = TcpStream::connect(redirect_uri.replace("http://", "").replace("/callback", ""))
-            .or_else(|_| {
-                let port = redirect_uri
-                    .trim_start_matches("http://127.0.0.1:")
-                    .split('/')
-                    .next()
-                    .unwrap_or("0");
-                TcpStream::connect(format!("127.0.0.1:{port}"))
-            })?;
+        let request =
+            format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
+        let mut stream =
+            TcpStream::connect(redirect_uri.replace("http://", "").replace("/callback", ""))
+                .or_else(|_| {
+                    let port = redirect_uri
+                        .trim_start_matches("http://127.0.0.1:")
+                        .split('/')
+                        .next()
+                        .unwrap_or("0");
+                    TcpStream::connect(format!("127.0.0.1:{port}"))
+                })?;
         stream.write_all(request.as_bytes())?;
         Ok(())
     }
@@ -1124,7 +1132,9 @@ mod tests {
         let decoded_url = start.auth_url.replace("%3A", ":").replace("%2F", "/");
         let redirect_uri = query_param(&decoded_url, "redirect_uri");
         let state = query_param(&start.auth_url, "state");
-        let redirect_uri = urlencoding::decode(redirect_uri).unwrap_or_default().into_owned();
+        let redirect_uri = urlencoding::decode(redirect_uri)
+            .unwrap_or_default()
+            .into_owned();
         let state = urlencoding::decode(state).unwrap_or_default().into_owned();
 
         thread::sleep(Duration::from_millis(100));
@@ -1136,17 +1146,29 @@ mod tests {
         assert_eq!(event.provider_id, "google");
         assert_eq!(event.label, "user@example.com");
 
-        let exchange = http.last_exchange.lock().unwrap().clone().expect("token exchange");
+        let exchange = http
+            .last_exchange
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("token exchange");
         assert_eq!(exchange.0, "auth-code");
         assert!(!exchange.1.is_empty());
 
-        let accounts = database.with_connection(|connection| AccountRepository::list_active(connection, Some("google")))?;
+        let accounts = database.with_connection(|connection| {
+            AccountRepository::list_active(connection, Some("google"))
+        })?;
         assert_eq!(accounts.len(), 1);
         assert_eq!(accounts[0].auth_type, "oauth");
-        assert_eq!(accounts[0].external_email.as_deref(), Some("user@example.com"));
-        assert!(credentials.credential_exists(
-            &database.with_connection(|connection| AccountRepository::credential_ref(connection, &accounts[0].id))?,
-        )?);
+        assert_eq!(
+            accounts[0].external_email.as_deref(),
+            Some("user@example.com")
+        );
+        assert!(
+            credentials.credential_exists(&database.with_connection(|connection| {
+                AccountRepository::credential_ref(connection, &accounts[0].id)
+            })?,)?
+        );
 
         assert!(error_rx.try_recv().is_err());
         Ok(())
@@ -1174,7 +1196,9 @@ mod tests {
 
         let decoded_url = start.auth_url.replace("%3A", ":").replace("%2F", "/");
         let redirect_uri = query_param(&decoded_url, "redirect_uri");
-        let redirect_uri = urlencoding::decode(redirect_uri).unwrap_or_default().into_owned();
+        let redirect_uri = urlencoding::decode(redirect_uri)
+            .unwrap_or_default()
+            .into_owned();
         thread::sleep(Duration::from_millis(100));
         send_callback(&redirect_uri, "auth-code", "wrong-state")?;
 
@@ -1183,7 +1207,9 @@ mod tests {
             .expect("oauth_error should fire");
         assert_eq!(event.error_code, "state_mismatch");
 
-        let accounts = database.with_connection(|connection| AccountRepository::list_active(connection, Some("google")))?;
+        let accounts = database.with_connection(|connection| {
+            AccountRepository::list_active(connection, Some("google"))
+        })?;
         assert!(accounts.is_empty());
         Ok(())
     }
@@ -1204,20 +1230,21 @@ mod tests {
         };
         credentials.store_oauth_credential(&credential_ref, "Google", "google", &expiring)?;
 
-        let account_id = database.with_connection(|connection| {
-            AccountRepository::create_oauth_account(
-                connection,
-                "google",
-                "Google",
-                &credential_ref,
-                "subject",
-                Some("user@example.com"),
-                &expiring.expires_at,
-                Some("openid email"),
-                true,
-            )
-        })?
-        .id;
+        let account_id = database
+            .with_connection(|connection| {
+                AccountRepository::create_oauth_account(
+                    connection,
+                    "google",
+                    "Google",
+                    &credential_ref,
+                    "subject",
+                    Some("user@example.com"),
+                    &expiring.expires_at,
+                    Some("openid email"),
+                    true,
+                )
+            })?
+            .id;
 
         let refreshed = oauth.refresh_oauth_access_token(&database, &credentials, &account_id)?;
         assert_eq!(refreshed, "refreshed-access");
@@ -1230,7 +1257,8 @@ mod tests {
         assert_eq!(stored.access_token, "refreshed-access");
         assert_eq!(stored.refresh_token, "refresh-token");
 
-        let status = database.with_connection(|connection| AccountRepository::get_status(connection, &account_id))?;
+        let status = database
+            .with_connection(|connection| AccountRepository::get_status(connection, &account_id))?;
         assert_eq!(status.status, "active");
         assert!(status.token_expires_at.is_some());
         Ok(())
@@ -1275,7 +1303,8 @@ mod tests {
         account_disconnect_with_service(&database, &credentials, account_id.clone())?;
         assert!(!credentials.credential_exists(&credential_ref)?);
 
-        let status = database.with_connection(|connection| AccountRepository::get_status(connection, &account_id))?;
+        let status = database
+            .with_connection(|connection| AccountRepository::get_status(connection, &account_id))?;
         assert_eq!(status.status, "revoked");
         Ok(())
     }

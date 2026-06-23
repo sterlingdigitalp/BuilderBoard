@@ -42,7 +42,10 @@ impl Database {
         &self.path
     }
 
-    pub fn with_connection<T>(&self, operation: impl FnOnce(&Connection) -> StorageResult<T>) -> StorageResult<T> {
+    pub fn with_connection<T>(
+        &self,
+        operation: impl FnOnce(&Connection) -> StorageResult<T>,
+    ) -> StorageResult<T> {
         let connection = self
             .connection
             .lock()

@@ -1,8 +1,11 @@
 use std::sync::Arc;
 
-use tauri::State;
+use tauri::{AppHandle, Emitter, Runtime, State};
 
 use crate::auth::CredentialService;
+use crate::chat::ProviderResolutionService;
+use crate::models::{Conversation, Message, MessageRole, Model};
+use crate::providers::{ProviderRequest, StreamChunk};
 use crate::storage::db::Database;
 use crate::storage::error::StorageError;
 use crate::storage::models::{
@@ -67,7 +70,10 @@ pub fn pane_close(database: State<'_, Arc<Database>>, pane_id: String) -> Result
 }
 
 #[tauri::command]
-pub fn message_list(database: State<'_, Arc<Database>>, pane_id: String) -> Result<Vec<MessageDto>, String> {
+pub fn message_list(
+    database: State<'_, Arc<Database>>,
+    pane_id: String,
+) -> Result<Vec<MessageDto>, String> {
     database
         .with_connection(|connection| MessageRepository::list_for_pane(connection, &pane_id))
         .map_err(format_storage_error)
@@ -180,11 +186,255 @@ pub fn message_error(
         .map_err(format_storage_error)
 }
 
+#[tauri::command]
+pub fn stream_chat(
+    app: AppHandle,
+    database: State<'_, Arc<Database>>,
+    credentials: State<'_, Arc<CredentialService>>,
+    pane_id: String,
+    provider_id: String,
+    account_id: String,
+    model_id: String,
+    assistant_message_id: String,
+) -> Result<(), String> {
+    if provider_id != "openai" {
+        let message = "Only OpenAI execution is supported in Phase 4B.".to_string();
+        emit_stream_error(
+            &app,
+            &pane_id,
+            &assistant_message_id,
+            "unsupported_provider",
+            &message,
+        );
+        return Err(message);
+    }
+
+    match stream_chat_with_services(
+        &app,
+        database.inner(),
+        credentials.inner(),
+        &pane_id,
+        &provider_id,
+        &account_id,
+        &model_id,
+        &assistant_message_id,
+    ) {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            let message = error.to_string();
+            let _ = database.with_connection(|connection| {
+                MessageRepository::mark_error(
+                    connection,
+                    MessageErrorRequest {
+                        message_id: assistant_message_id.clone(),
+                        error_code: "provider_execution_failed".to_string(),
+                        error_message: message.clone(),
+                    },
+                )
+            });
+            emit_stream_error(
+                &app,
+                &pane_id,
+                &assistant_message_id,
+                "provider_execution_failed",
+                &message,
+            );
+            Err(message)
+        }
+    }
+}
+
+pub fn stream_chat_with_services<R: Runtime>(
+    app: &AppHandle<R>,
+    database: &Database,
+    credentials: &CredentialService,
+    pane_id: &str,
+    provider_id: &str,
+    account_id: &str,
+    model_id: &str,
+    assistant_message_id: &str,
+) -> Result<(), StorageError> {
+    database.with_connection(|connection| {
+        PaneRepository::get_open_by_id(connection, pane_id)?;
+        let now = chrono::Utc::now().to_rfc3339();
+        let updated = connection.execute(
+            "UPDATE panes
+             SET provider_id = ?1,
+                 account_id = ?2,
+                 model_id = ?3,
+                 updated_at = ?4
+             WHERE id = ?5 AND closed_at IS NULL",
+            (provider_id, account_id, model_id, &now, pane_id),
+        )?;
+
+        if updated == 0 {
+            return Err(StorageError::NotFound(format!(
+                "open pane {pane_id} not found"
+            )));
+        }
+
+        let resolved =
+            ProviderResolutionService::resolve_for_pane_execution(connection, pane_id, credentials)
+                .map_err(|error| {
+                    StorageError::InvalidInput(format!("provider resolution error: {error:?}"))
+                })?;
+        let conversation = conversation_for_stream(connection, pane_id, model_id)?;
+        let stream = resolved
+            .provider
+            .stream(ProviderRequest::new(conversation))
+            .map_err(|error| {
+                StorageError::InvalidInput(format!("provider stream error: {error:?}"))
+            })?;
+
+        for chunk in stream {
+            match chunk {
+                Ok(chunk) => {
+                    apply_stream_chunk(app, connection, pane_id, assistant_message_id, chunk)?
+                }
+                Err(error) => {
+                    let message = format!("{error:?}");
+                    let _ = MessageRepository::mark_error(
+                        connection,
+                        MessageErrorRequest {
+                            message_id: assistant_message_id.to_string(),
+                            error_code: "provider_error".to_string(),
+                            error_message: message.clone(),
+                        },
+                    );
+                    return Err(StorageError::InvalidInput(message));
+                }
+            }
+        }
+
+        let latest = MessageRepository::get_by_id(connection, assistant_message_id)?;
+        if latest.status != "complete" {
+            MessageRepository::mark_complete(
+                connection,
+                MessageCompleteRequest {
+                    message_id: assistant_message_id.to_string(),
+                    content: None,
+                    token_count_input: None,
+                    token_count_output: None,
+                    metadata_json: None,
+                },
+            )?;
+            emit_stream_complete(app, pane_id, assistant_message_id);
+        }
+
+        Ok(())
+    })
+}
+
+fn apply_stream_chunk<R: Runtime>(
+    app: &AppHandle<R>,
+    connection: &rusqlite::Connection,
+    pane_id: &str,
+    assistant_message_id: &str,
+    chunk: StreamChunk,
+) -> Result<(), StorageError> {
+    if chunk.is_complete {
+        MessageRepository::mark_complete(
+            connection,
+            MessageCompleteRequest {
+                message_id: assistant_message_id.to_string(),
+                content: None,
+                token_count_input: None,
+                token_count_output: None,
+                metadata_json: None,
+            },
+        )?;
+        emit_stream_complete(app, pane_id, assistant_message_id);
+    } else if !chunk.content_delta.is_empty() {
+        MessageRepository::stream_update(
+            connection,
+            MessageStreamUpdateRequest {
+                message_id: assistant_message_id.to_string(),
+                delta: chunk.content_delta.clone(),
+            },
+        )?;
+        emit_stream_chunk(app, pane_id, assistant_message_id, &chunk.content_delta);
+    }
+
+    Ok(())
+}
+
+fn conversation_for_stream(
+    connection: &rusqlite::Connection,
+    pane_id: &str,
+    model_id: &str,
+) -> Result<Conversation, StorageError> {
+    let mut conversation = Conversation::new(pane_id, model_from_id(model_id));
+    for message in MessageRepository::list_for_pane(connection, pane_id)? {
+        if message.role == "assistant" && message.status == "pending" && message.content.is_empty()
+        {
+            continue;
+        }
+        let role = match message.role.as_str() {
+            "system" => Some(MessageRole::System),
+            "user" => Some(MessageRole::User),
+            "assistant" => Some(MessageRole::Assistant),
+            _ => None,
+        };
+        if let Some(role) = role {
+            conversation = conversation.with_message(Message::new(role, message.content));
+        }
+    }
+    Ok(conversation)
+}
+
+fn model_from_id(model_id: &str) -> Model {
+    match model_id {
+        "OpenAIGpt" | "gpt-4o-mini" => Model::OpenAIGpt,
+        other => Model::Custom(other.to_string()),
+    }
+}
+
+fn emit_stream_chunk<R: Runtime>(app: &AppHandle<R>, pane_id: &str, message_id: &str, delta: &str) {
+    let _ = app.emit(
+        "message_stream_chunk",
+        serde_json::json!({
+            "paneId": pane_id,
+            "messageId": message_id,
+            "delta": delta,
+        }),
+    );
+}
+
+fn emit_stream_complete<R: Runtime>(app: &AppHandle<R>, pane_id: &str, message_id: &str) {
+    let _ = app.emit(
+        "message_stream_complete",
+        serde_json::json!({
+            "paneId": pane_id,
+            "messageId": message_id,
+        }),
+    );
+}
+
+fn emit_stream_error<R: Runtime>(
+    app: &AppHandle<R>,
+    pane_id: &str,
+    message_id: &str,
+    error_code: &str,
+    message: &str,
+) {
+    let _ = app.emit(
+        "message_stream_error",
+        serde_json::json!({
+            "paneId": pane_id,
+            "messageId": message_id,
+            "errorCode": error_code,
+            "message": message,
+        }),
+    );
+}
+
 pub fn message_create_with_database(
     database: &Database,
     request: MessageCreateRequest,
 ) -> Result<MessageCreateResult, StorageError> {
-    database.with_connection(|connection| MessageRepository::create_conversation_turn(connection, request))
+    database.with_connection(|connection| {
+        MessageRepository::create_conversation_turn(connection, request)
+    })
 }
 
 #[tauri::command]
@@ -308,7 +558,10 @@ mod tests {
         let db = Database::initialize_at(path)?;
 
         let providers = provider_list_from_database(&db).expect("provider_list should succeed");
-        let provider_ids: Vec<_> = providers.iter().map(|provider| provider.id.as_str()).collect();
+        let provider_ids: Vec<_> = providers
+            .iter()
+            .map(|provider| provider.id.as_str())
+            .collect();
 
         assert_eq!(providers.len(), 3);
         assert!(provider_ids.contains(&"anthropic"));
@@ -426,11 +679,18 @@ mod tests {
             Some(false),
         )?;
 
-        database.with_connection(|connection| AccountRepository::set_default(connection, &second.id))?;
+        database
+            .with_connection(|connection| AccountRepository::set_default(connection, &second.id))?;
 
         let accounts = account_list_from_database(&database, Some("openai".to_string()))?;
-        let first = accounts.iter().find(|account| account.id == first.id).unwrap();
-        let second = accounts.iter().find(|account| account.id == second.id).unwrap();
+        let first = accounts
+            .iter()
+            .find(|account| account.id == first.id)
+            .unwrap();
+        let second = accounts
+            .iter()
+            .find(|account| account.id == second.id)
+            .unwrap();
         assert!(!first.is_default);
         assert!(second.is_default);
         Ok(())
@@ -456,9 +716,8 @@ mod tests {
         account_disconnect_with_service(&database, &credentials, account.id.clone())?;
 
         assert!(!credentials.credential_exists(&credential_ref)?);
-        let status = database.with_connection(|connection| {
-            AccountRepository::get_status(connection, &account.id)
-        })?;
+        let status = database
+            .with_connection(|connection| AccountRepository::get_status(connection, &account.id))?;
         assert_eq!(status.status, "revoked");
         Ok(())
     }

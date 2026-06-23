@@ -37,7 +37,9 @@ fn live_openai_streaming_execution_persists_response() -> StorageResult<()> {
         )?;
         let credential_ref = AccountRepository::credential_ref(connection, &account.id)?;
         let credential_exists = credentials.credential_exists(&credential_ref)?;
-        let read_api_key_result = credentials.read_api_key(&credential_ref).map(|api_key| !api_key.trim().is_empty());
+        let read_api_key_result = credentials
+            .read_api_key(&credential_ref)
+            .map(|api_key| !api_key.trim().is_empty());
 
         println!("PHASE4B_CREDENTIAL_EXISTS={credential_exists}");
         println!(
@@ -74,13 +76,20 @@ fn live_openai_streaming_execution_persists_response() -> StorageResult<()> {
         println!("PHASE4B_ASSISTANT_MESSAGE_ID={}", assistant.id);
         println!("PHASE4B_ASSISTANT_STATUS={}", assistant.status);
         println!("PHASE4B_MESSAGE_COUNT={}", messages.len());
-        println!("PHASE4B_RESPONSE_PREVIEW={}", response_preview.replace('\n', " "));
+        println!(
+            "PHASE4B_RESPONSE_PREVIEW={}",
+            response_preview.replace('\n', " ")
+        );
 
         assert_eq!(assistant.status, "complete");
         assert!(!assistant.content.trim().is_empty());
-        assert!(messages.iter().any(|message| message.role == "user" && message.content == "Hello"));
+        assert!(messages
+            .iter()
+            .any(|message| message.role == "user" && message.content == "Hello"));
         assert!(messages.iter().any(|message| {
-            message.role == "assistant" && message.status == "complete" && !message.content.trim().is_empty()
+            message.role == "assistant"
+                && message.status == "complete"
+                && !message.content.trim().is_empty()
         }));
 
         Ok(())

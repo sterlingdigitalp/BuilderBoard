@@ -12,6 +12,7 @@ commands.allow = [
   "message_stream_update",
   "message_complete",
   "message_error",
+  "stream_chat",
   "account_create_api_key",
   "account_list",
   "account_disconnect",

@@ -70,16 +70,21 @@ fn emit_oauth_success(app: &AppHandle, database: Arc<Database>, event: OAuthComp
             Err(error) => oauth_log(format!("Failed to emit oauth_complete: {error}")),
         }
 
-        match database.with_connection(|connection| AccountRepository::get_by_id(connection, &account_id))
+        match database
+            .with_connection(|connection| AccountRepository::get_by_id(connection, &account_id))
         {
             Ok(account) => match app_for_emit.emit("account_created", &account) {
                 Ok(()) => oauth_log(format!("Emitted account_created for account {account_id}")),
                 Err(error) => oauth_log(format!("Failed to emit account_created: {error}")),
             },
-            Err(error) => oauth_log(format!("Failed to load account for account_created event: {error}")),
+            Err(error) => oauth_log(format!(
+                "Failed to load account for account_created event: {error}"
+            )),
         }
     }) {
-        oauth_log(format!("Failed to schedule oauth success events on main thread: {err}"));
+        oauth_log(format!(
+            "Failed to schedule oauth success events on main thread: {err}"
+        ));
     }
 }
 
@@ -88,13 +93,15 @@ fn emit_oauth_error(app: &AppHandle, event: OAuthErrorEvent) {
     let app_for_emit = app.clone();
     let provider_id = event.provider_id.clone();
 
-    if let Err(err) = app_for_thread.run_on_main_thread(move || {
-        match app_for_emit.emit("oauth_error", &event) {
+    if let Err(err) =
+        app_for_thread.run_on_main_thread(move || match app_for_emit.emit("oauth_error", &event) {
             Ok(()) => oauth_log(format!("Emitted oauth_error for provider {provider_id}")),
             Err(error) => oauth_log(format!("Failed to emit oauth_error: {error}")),
-        }
-    }) {
-        oauth_log(format!("Failed to schedule oauth_error event on main thread: {err}"));
+        })
+    {
+        oauth_log(format!(
+            "Failed to schedule oauth_error event on main thread: {err}"
+        ));
     }
 }
 

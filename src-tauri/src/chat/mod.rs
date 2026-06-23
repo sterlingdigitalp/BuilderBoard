@@ -4,8 +4,8 @@ use rusqlite::Connection;
 use crate::auth::{CredentialHandle, CredentialService};
 use crate::models::{Conversation, Message, MessageRole, Model};
 use crate::providers::{
-    resolve_openai_provider_with_api_key, resolve_provider_with_credential, LLMProvider, ProviderError,
-    ProviderRequest, ProviderResolutionError, ResolvedProvider,
+    resolve_openai_provider_with_api_key, resolve_provider_with_credential, LLMProvider,
+    ProviderError, ProviderRequest, ProviderResolutionError, ResolvedProvider,
 };
 use crate::storage::error::StorageError;
 use crate::storage::models::{
@@ -187,7 +187,8 @@ impl ProviderResolutionService {
         let provider = ProviderRepository::get_enabled_by_id(connection, provider_id)
             .map_err(|error| ProviderResolutionError::storage(error.to_string()))?;
 
-        let credential = Self::resolve_credential(connection, provider_id, pane.account_id.as_deref())?;
+        let credential =
+            Self::resolve_credential(connection, provider_id, pane.account_id.as_deref())?;
 
         Ok((provider, credential))
     }
@@ -198,13 +199,18 @@ impl ProviderResolutionService {
         account_id: Option<&str>,
     ) -> Result<CredentialHandle, ProviderResolutionError> {
         let account = match account_id {
-            Some(account_id) => AccountRepository::get_by_id(connection, account_id).map_err(|error| {
-                if matches!(error, StorageError::NotFound(_)) {
-                    ProviderResolutionError::no_account(provider_id, Some(account_id.to_string()))
-                } else {
-                    ProviderResolutionError::storage(error.to_string())
-                }
-            })?,
+            Some(account_id) => {
+                AccountRepository::get_by_id(connection, account_id).map_err(|error| {
+                    if matches!(error, StorageError::NotFound(_)) {
+                        ProviderResolutionError::no_account(
+                            provider_id,
+                            Some(account_id.to_string()),
+                        )
+                    } else {
+                        ProviderResolutionError::storage(error.to_string())
+                    }
+                })?
+            }
             None => AccountRepository::get_default_for_provider(connection, provider_id)
                 .map_err(|error| ProviderResolutionError::storage(error.to_string()))?
                 .ok_or_else(|| ProviderResolutionError::no_account(provider_id, None))?,
@@ -270,10 +276,14 @@ fn is_expired(expires_at: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn conversation_for_pane(connection: &Connection, pane_id: &str) -> Result<Conversation, StorageError> {
+fn conversation_for_pane(
+    connection: &Connection,
+    pane_id: &str,
+) -> Result<Conversation, StorageError> {
     let mut conversation = Conversation::new(pane_id, Model::OpenAIGpt);
     for message in MessageRepository::list_for_pane(connection, pane_id)? {
-        if message.role == "assistant" && message.status == "pending" && message.content.is_empty() {
+        if message.role == "assistant" && message.status == "pending" && message.content.is_empty()
+        {
             continue;
         }
         if let Some(role) = message_role(&message.role) {
@@ -313,16 +323,29 @@ mod tests {
     fn resolves_openai_account() -> StorageResult<()> {
         let conn = rusqlite::Connection::open_in_memory()?;
         conn.execute_batch(crate::storage::migrations::MIGRATIONS_FOR_TEST)?;
-        AccountRepository::insert_test_account(&conn, "openai-account", "openai", "api_key", "active", true)?;
+        AccountRepository::insert_test_account(
+            &conn,
+            "openai-account",
+            "openai",
+            "api_key",
+            "active",
+            true,
+        )?;
         let pane = create_bound_pane(&conn, "openai", Some("openai-account"))?;
 
         let resolved = ProviderResolutionService::resolve_for_pane(&conn, &pane.id)
             .expect("openai provider should resolve with account");
 
-        assert_eq!(resolved.provider.list_models().unwrap(), vec![Model::OpenAIGpt]);
+        assert_eq!(
+            resolved.provider.list_models().unwrap(),
+            vec![Model::OpenAIGpt]
+        );
         assert_eq!(resolved.credential.account_id, "openai-account");
         assert_eq!(resolved.credential.auth_type, "api_key");
-        assert_eq!(resolved.credential.credential_ref, "credential-ref-openai-account");
+        assert_eq!(
+            resolved.credential.credential_ref,
+            "credential-ref-openai-account"
+        );
         Ok(())
     }
 
@@ -330,13 +353,23 @@ mod tests {
     fn resolves_anthropic_account() -> StorageResult<()> {
         let conn = rusqlite::Connection::open_in_memory()?;
         conn.execute_batch(crate::storage::migrations::MIGRATIONS_FOR_TEST)?;
-        AccountRepository::insert_test_account(&conn, "anthropic-account", "anthropic", "api_key", "active", true)?;
+        AccountRepository::insert_test_account(
+            &conn,
+            "anthropic-account",
+            "anthropic",
+            "api_key",
+            "active",
+            true,
+        )?;
         let pane = create_bound_pane(&conn, "anthropic", Some("anthropic-account"))?;
 
         let resolved = ProviderResolutionService::resolve_for_pane(&conn, &pane.id)
             .expect("anthropic provider should resolve with account");
 
-        assert_eq!(resolved.provider.list_models().unwrap(), vec![Model::AnthropicClaude]);
+        assert_eq!(
+            resolved.provider.list_models().unwrap(),
+            vec![Model::AnthropicClaude]
+        );
         assert_eq!(resolved.credential.account_id, "anthropic-account");
         Ok(())
     }
@@ -345,13 +378,23 @@ mod tests {
     fn resolves_google_account() -> StorageResult<()> {
         let conn = rusqlite::Connection::open_in_memory()?;
         conn.execute_batch(crate::storage::migrations::MIGRATIONS_FOR_TEST)?;
-        AccountRepository::insert_test_account(&conn, "google-account", "google", "oauth", "active", true)?;
+        AccountRepository::insert_test_account(
+            &conn,
+            "google-account",
+            "google",
+            "oauth",
+            "active",
+            true,
+        )?;
         let pane = create_bound_pane(&conn, "google", Some("google-account"))?;
 
         let resolved = ProviderResolutionService::resolve_for_pane(&conn, &pane.id)
             .expect("google provider should resolve with credential handle");
 
-        assert_eq!(resolved.provider.list_models().unwrap(), vec![Model::GoogleGemini]);
+        assert_eq!(
+            resolved.provider.list_models().unwrap(),
+            vec![Model::GoogleGemini]
+        );
         assert_eq!(resolved.credential.account_id, "google-account");
         assert_eq!(resolved.credential.auth_type, "oauth");
         assert!(resolved.credential.is_oauth());
@@ -362,17 +405,30 @@ mod tests {
     fn resolves_google_default_oauth_account() -> StorageResult<()> {
         let conn = rusqlite::Connection::open_in_memory()?;
         conn.execute_batch(crate::storage::migrations::MIGRATIONS_FOR_TEST)?;
-        AccountRepository::insert_test_account(&conn, "default-google", "google", "oauth", "active", true)?;
+        AccountRepository::insert_test_account(
+            &conn,
+            "default-google",
+            "google",
+            "oauth",
+            "active",
+            true,
+        )?;
         set_token_expires_at(&conn, "default-google", "2099-01-01T00:00:00Z")?;
         let pane = create_bound_pane(&conn, "google", None)?;
 
         let resolved = ProviderResolutionService::resolve_for_pane(&conn, &pane.id)
             .expect("google default OAuth account should resolve");
 
-        assert_eq!(resolved.provider.list_models().unwrap(), vec![Model::GoogleGemini]);
+        assert_eq!(
+            resolved.provider.list_models().unwrap(),
+            vec![Model::GoogleGemini]
+        );
         assert_eq!(resolved.credential.account_id, "default-google");
         assert_eq!(resolved.credential.auth_type, "oauth");
-        assert_eq!(resolved.credential.token_expires_at.as_deref(), Some("2099-01-01T00:00:00Z"));
+        assert_eq!(
+            resolved.credential.token_expires_at.as_deref(),
+            Some("2099-01-01T00:00:00Z")
+        );
         Ok(())
     }
 
@@ -380,13 +436,23 @@ mod tests {
     fn resolves_default_account_when_pane_has_no_account() -> StorageResult<()> {
         let conn = rusqlite::Connection::open_in_memory()?;
         conn.execute_batch(crate::storage::migrations::MIGRATIONS_FOR_TEST)?;
-        AccountRepository::insert_test_account(&conn, "default-openai", "openai", "api_key", "active", true)?;
+        AccountRepository::insert_test_account(
+            &conn,
+            "default-openai",
+            "openai",
+            "api_key",
+            "active",
+            true,
+        )?;
         let pane = create_bound_pane(&conn, "openai", None)?;
 
         let resolved = ProviderResolutionService::resolve_for_pane(&conn, &pane.id)
             .expect("default account should resolve");
 
-        assert_eq!(resolved.provider.list_models().unwrap(), vec![Model::OpenAIGpt]);
+        assert_eq!(
+            resolved.provider.list_models().unwrap(),
+            vec![Model::OpenAIGpt]
+        );
         assert_eq!(resolved.credential.account_id, "default-openai");
         Ok(())
     }
@@ -395,7 +461,14 @@ mod tests {
     fn execution_resolver_binds_openai_api_key_from_credential_service() -> StorageResult<()> {
         let conn = rusqlite::Connection::open_in_memory()?;
         conn.execute_batch(crate::storage::migrations::MIGRATIONS_FOR_TEST)?;
-        AccountRepository::insert_test_account(&conn, "openai-exec", "openai", "api_key", "active", true)?;
+        AccountRepository::insert_test_account(
+            &conn,
+            "openai-exec",
+            "openai",
+            "api_key",
+            "active",
+            true,
+        )?;
         let credentials = CredentialService::in_memory();
         credentials.store_api_key(
             "credential-ref-openai-exec",
@@ -405,15 +478,15 @@ mod tests {
         )?;
         let pane = create_bound_pane(&conn, "openai", Some("openai-exec"))?;
 
-        let resolved = ProviderResolutionService::resolve_for_pane_execution(
-            &conn,
-            &pane.id,
-            &credentials,
-        )
-        .expect("OpenAI execution provider should resolve with API key");
+        let resolved =
+            ProviderResolutionService::resolve_for_pane_execution(&conn, &pane.id, &credentials)
+                .expect("OpenAI execution provider should resolve with API key");
 
         assert_eq!(resolved.credential.account_id, "openai-exec");
-        assert_eq!(resolved.provider.list_models().unwrap(), vec![Model::OpenAIGpt]);
+        assert_eq!(
+            resolved.provider.list_models().unwrap(),
+            vec![Model::OpenAIGpt]
+        );
         Ok(())
     }
 
@@ -441,7 +514,14 @@ mod tests {
     fn execution_resolver_rejects_non_openai_provider() -> StorageResult<()> {
         let conn = rusqlite::Connection::open_in_memory()?;
         conn.execute_batch(crate::storage::migrations::MIGRATIONS_FOR_TEST)?;
-        AccountRepository::insert_test_account(&conn, "anthropic-exec", "anthropic", "api_key", "active", true)?;
+        AccountRepository::insert_test_account(
+            &conn,
+            "anthropic-exec",
+            "anthropic",
+            "api_key",
+            "active",
+            true,
+        )?;
         let credentials = CredentialService::in_memory();
         credentials.store_api_key(
             "credential-ref-anthropic-exec",
@@ -468,7 +548,14 @@ mod tests {
     fn openai_streaming_response_is_persisted_in_pane_conversation() -> StorageResult<()> {
         let conn = rusqlite::Connection::open_in_memory()?;
         conn.execute_batch(crate::storage::migrations::MIGRATIONS_FOR_TEST)?;
-        AccountRepository::insert_test_account(&conn, "openai-stream", "openai", "api_key", "active", true)?;
+        AccountRepository::insert_test_account(
+            &conn,
+            "openai-stream",
+            "openai",
+            "api_key",
+            "active",
+            true,
+        )?;
         let pane = create_bound_pane(&conn, "openai", Some("openai-stream"))?;
         let base_url = spawn_streaming_server(concat!(
             "data: {\"choices\":[{\"delta\":{\"content\":\"Hi\"},\"finish_reason\":null}]}\n\n",
@@ -502,7 +589,14 @@ mod tests {
     fn inactive_account_is_rejected() -> StorageResult<()> {
         let conn = rusqlite::Connection::open_in_memory()?;
         conn.execute_batch(crate::storage::migrations::MIGRATIONS_FOR_TEST)?;
-        AccountRepository::insert_test_account(&conn, "revoked-openai", "openai", "api_key", "revoked", true)?;
+        AccountRepository::insert_test_account(
+            &conn,
+            "revoked-openai",
+            "openai",
+            "api_key",
+            "revoked",
+            true,
+        )?;
         let pane = create_bound_pane(&conn, "openai", Some("revoked-openai"))?;
 
         let error = match ProviderResolutionService::resolve_for_pane(&conn, &pane.id) {
@@ -519,7 +613,14 @@ mod tests {
     fn expired_account_status_is_rejected() -> StorageResult<()> {
         let conn = rusqlite::Connection::open_in_memory()?;
         conn.execute_batch(crate::storage::migrations::MIGRATIONS_FOR_TEST)?;
-        AccountRepository::insert_test_account(&conn, "expired-google", "google", "oauth", "expired", true)?;
+        AccountRepository::insert_test_account(
+            &conn,
+            "expired-google",
+            "google",
+            "oauth",
+            "expired",
+            true,
+        )?;
         let pane = create_bound_pane(&conn, "google", Some("expired-google"))?;
 
         let error = match ProviderResolutionService::resolve_for_pane(&conn, &pane.id) {
@@ -536,7 +637,14 @@ mod tests {
     fn expired_oauth_token_is_rejected() -> StorageResult<()> {
         let conn = rusqlite::Connection::open_in_memory()?;
         conn.execute_batch(crate::storage::migrations::MIGRATIONS_FOR_TEST)?;
-        AccountRepository::insert_test_account(&conn, "past-google", "google", "oauth", "active", true)?;
+        AccountRepository::insert_test_account(
+            &conn,
+            "past-google",
+            "google",
+            "oauth",
+            "active",
+            true,
+        )?;
         set_token_expires_at(&conn, "past-google", "2000-01-01T00:00:00Z")?;
         let pane = create_bound_pane(&conn, "google", Some("past-google"))?;
 
@@ -658,7 +766,11 @@ mod tests {
             let mut buffer = [0_u8; 1024];
             loop {
                 let read = stream.read(&mut buffer).expect("read request");
-                if read == 0 || buffer[..read].windows(4).any(|window| window == b"\r\n\r\n") {
+                if read == 0
+                    || buffer[..read]
+                        .windows(4)
+                        .any(|window| window == b"\r\n\r\n")
+                {
                     break;
                 }
             }

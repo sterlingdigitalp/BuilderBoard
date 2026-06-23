@@ -52,11 +52,23 @@ pub struct StreamChunk {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ProviderError {
-    NotImplemented { provider: Provider },
-    MissingCredentials { provider: Provider },
-    UnsupportedAuth { provider: Provider, auth_type: String },
-    Http { status: Option<u16>, message: String },
-    InvalidResponse { message: String },
+    NotImplemented {
+        provider: Provider,
+    },
+    MissingCredentials {
+        provider: Provider,
+    },
+    UnsupportedAuth {
+        provider: Provider,
+        auth_type: String,
+    },
+    Http {
+        status: Option<u16>,
+        message: String,
+    },
+    InvalidResponse {
+        message: String,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -83,7 +95,9 @@ impl ProviderResolutionError {
     pub fn no_account(provider_id: impl Into<String>, account_id: Option<String>) -> Self {
         let provider_id = provider_id.into();
         let message = match account_id.as_deref() {
-            Some(account_id) => format!("account '{account_id}' was not found for provider '{provider_id}'"),
+            Some(account_id) => {
+                format!("account '{account_id}' was not found for provider '{provider_id}'")
+            }
             None => format!("provider '{provider_id}' has no active account"),
         };
 
@@ -109,7 +123,9 @@ impl ProviderResolutionError {
             provider_id: Some(provider_id.clone()),
             provider_type: None,
             account_id: Some(account_id.clone()),
-            message: format!("account '{account_id}' for provider '{provider_id}' is not active: {status}"),
+            message: format!(
+                "account '{account_id}' for provider '{provider_id}' is not active: {status}"
+            ),
         }
     }
 
@@ -125,7 +141,10 @@ impl ProviderResolutionError {
         }
     }
 
-    pub fn unsupported_provider(provider_id: impl Into<String>, provider_type: impl Into<String>) -> Self {
+    pub fn unsupported_provider(
+        provider_id: impl Into<String>,
+        provider_type: impl Into<String>,
+    ) -> Self {
         let provider_id = provider_id.into();
         let provider_type = provider_type.into();
         Self {
@@ -133,7 +152,9 @@ impl ProviderResolutionError {
             provider_id: Some(provider_id.clone()),
             provider_type: Some(provider_type.clone()),
             account_id: None,
-            message: format!("provider '{provider_id}' with type '{provider_type}' is not supported in Phase 3A"),
+            message: format!(
+                "provider '{provider_id}' with type '{provider_type}' is not supported in Phase 3A"
+            ),
         }
     }
 
@@ -155,7 +176,10 @@ pub struct ResolvedProvider {
 
 impl ResolvedProvider {
     pub fn new(provider: Box<dyn LLMProvider>, credential: CredentialHandle) -> Self {
-        Self { provider, credential }
+        Self {
+            provider,
+            credential,
+        }
     }
 }
 
@@ -201,7 +225,10 @@ impl OpenAIProvider {
     }
 
     #[cfg(test)]
-    pub(crate) fn with_base_url_for_test(api_key: impl Into<String>, base_url: impl Into<String>) -> Self {
+    pub(crate) fn with_base_url_for_test(
+        api_key: impl Into<String>,
+        base_url: impl Into<String>,
+    ) -> Self {
         Self {
             api_key: Some(api_key.into()),
             base_url: base_url.into(),
@@ -230,7 +257,11 @@ impl OpenAIProvider {
         })
     }
 
-    fn send_request(&self, request: ProviderRequest, stream: bool) -> ProviderResult<reqwest::blocking::Response> {
+    fn send_request(
+        &self,
+        request: ProviderRequest,
+        stream: bool,
+    ) -> ProviderResult<reqwest::blocking::Response> {
         let api_key = self.api_key()?;
         let response = self
             .client
@@ -278,11 +309,12 @@ impl LLMProvider for OpenAIProvider {
     fn send(&self, request: ProviderRequest) -> ProviderResult<ProviderResponse> {
         let model = request.conversation.model.clone();
         let response = self.send_request(request, false)?;
-        let body: OpenAIChatCompletionResponse = response.json().map_err(|error| {
-            ProviderError::InvalidResponse {
-                message: error.to_string(),
-            }
-        })?;
+        let body: OpenAIChatCompletionResponse =
+            response
+                .json()
+                .map_err(|error| ProviderError::InvalidResponse {
+                    message: error.to_string(),
+                })?;
         let content = body
             .choices
             .into_iter()
@@ -530,8 +562,14 @@ mod tests {
 
     #[test]
     fn provider_stubs_list_models_without_network() {
-        assert_eq!(AnthropicProvider.list_models(), Ok(vec![Model::AnthropicClaude]));
-        assert_eq!(OpenAIProvider::new().list_models(), Ok(vec![Model::OpenAIGpt]));
+        assert_eq!(
+            AnthropicProvider.list_models(),
+            Ok(vec![Model::AnthropicClaude])
+        );
+        assert_eq!(
+            OpenAIProvider::new().list_models(),
+            Ok(vec![Model::OpenAIGpt])
+        );
         assert_eq!(GoogleProvider.list_models(), Ok(vec![Model::GoogleGemini]));
     }
 
@@ -575,7 +613,8 @@ mod tests {
             "data: {\"choices\":[{\"delta\":{\"content\":\"lo\"},\"finish_reason\":null}]}\n\n",
             "data: [DONE]\n\n",
         );
-        let (base_url, request_rx) = spawn_openai_server("HTTP/1.1 200 OK", "text/event-stream", body);
+        let (base_url, request_rx) =
+            spawn_openai_server("HTTP/1.1 200 OK", "text/event-stream", body);
         let provider = OpenAIProvider::with_base_url_for_test("sk-test", base_url);
 
         let chunks = provider
@@ -604,7 +643,13 @@ mod tests {
             .send(ProviderRequest::new(openai_hello_conversation()))
             .expect_err("invalid key should return provider error");
 
-        assert!(matches!(error, ProviderError::Http { status: Some(401), .. }));
+        assert!(matches!(
+            error,
+            ProviderError::Http {
+                status: Some(401),
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -618,9 +663,18 @@ mod tests {
 
     #[test]
     fn mvp_provider_types_resolve() {
-        assert_eq!(resolve("anthropic").list_models().unwrap(), vec![Model::AnthropicClaude]);
-        assert_eq!(resolve("openai").list_models().unwrap(), vec![Model::OpenAIGpt]);
-        assert_eq!(resolve("google").list_models().unwrap(), vec![Model::GoogleGemini]);
+        assert_eq!(
+            resolve("anthropic").list_models().unwrap(),
+            vec![Model::AnthropicClaude]
+        );
+        assert_eq!(
+            resolve("openai").list_models().unwrap(),
+            vec![Model::OpenAIGpt]
+        );
+        assert_eq!(
+            resolve("google").list_models().unwrap(),
+            vec![Model::GoogleGemini]
+        );
     }
 
     #[test]

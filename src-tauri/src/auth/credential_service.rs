@@ -160,8 +160,7 @@ impl CredentialService {
                 StorageError::InvalidInput("oauth refresh token is required".to_string())
             })?;
 
-        let expires_at = Utc::now()
-            + Duration::seconds(expires_in.unwrap_or(3600).max(1));
+        let expires_at = Utc::now() + Duration::seconds(expires_in.unwrap_or(3600).max(1));
         Ok(OAuthCredential {
             access_token,
             refresh_token,
@@ -257,7 +256,9 @@ impl CredentialStore for MemoryCredentialStore {
     ) -> StorageResult<()> {
         self.entries
             .lock()
-            .map_err(|_| StorageError::Keychain("memory credential store lock poisoned".to_string()))?
+            .map_err(|_| {
+                StorageError::Keychain("memory credential store lock poisoned".to_string())
+            })?
             .insert(credential_ref.to_string(), payload.to_string());
         Ok(())
     }
@@ -265,7 +266,9 @@ impl CredentialStore for MemoryCredentialStore {
     fn read_payload(&self, credential_ref: &str) -> StorageResult<String> {
         self.entries
             .lock()
-            .map_err(|_| StorageError::Keychain("memory credential store lock poisoned".to_string()))?
+            .map_err(|_| {
+                StorageError::Keychain("memory credential store lock poisoned".to_string())
+            })?
             .get(credential_ref)
             .cloned()
             .ok_or_else(|| StorageError::NotFound(format!("credential {credential_ref} not found")))
@@ -274,7 +277,9 @@ impl CredentialStore for MemoryCredentialStore {
     fn delete_credential(&self, credential_ref: &str) -> StorageResult<()> {
         self.entries
             .lock()
-            .map_err(|_| StorageError::Keychain("memory credential store lock poisoned".to_string()))?
+            .map_err(|_| {
+                StorageError::Keychain("memory credential store lock poisoned".to_string())
+            })?
             .remove(credential_ref);
         Ok(())
     }
@@ -283,7 +288,9 @@ impl CredentialStore for MemoryCredentialStore {
         Ok(self
             .entries
             .lock()
-            .map_err(|_| StorageError::Keychain("memory credential store lock poisoned".to_string()))?
+            .map_err(|_| {
+                StorageError::Keychain("memory credential store lock poisoned".to_string())
+            })?
             .contains_key(credential_ref))
     }
 }
@@ -317,7 +324,9 @@ mod tests {
             token_type: "Bearer".to_string(),
             expires_at: (Utc::now() + Duration::minutes(2)).to_rfc3339(),
         };
-        assert!(CredentialService::oauth_access_token_needs_refresh(&credential)?);
+        assert!(CredentialService::oauth_access_token_needs_refresh(
+            &credential
+        )?);
         Ok(())
     }
 }

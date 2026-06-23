@@ -250,7 +250,10 @@ impl MessageRepository {
         Self::get_by_id(connection, &request.message_id)
     }
 
-    pub fn append(connection: &Connection, request: AppendMessageRequest) -> StorageResult<MessageDto> {
+    pub fn append(
+        connection: &Connection,
+        request: AppendMessageRequest,
+    ) -> StorageResult<MessageDto> {
         if !VALID_ROLES.contains(&request.role.as_str()) {
             return Err(StorageError::InvalidInput(format!(
                 "invalid message role: {}",

@@ -27,3 +27,6 @@ base64 = "0.22"
 rand = "0.8"
 urlencoding = "2"
 
+[dev-dependencies]
+tauri = { version = "2.11.3", features = ["test"] }
+

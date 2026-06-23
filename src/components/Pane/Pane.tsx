@@ -1,4 +1,5 @@
 import type { PaneDefinition } from "../../types/layout";
+import { ChatPane } from "../Chat";
 
 interface PaneProps {
   pane: PaneDefinition;
@@ -27,7 +28,9 @@ export function Pane({ pane, isMutating, onClose, onCreate }: PaneProps) {
           Close
         </button>
       </header>
-      <div className="pane__body" aria-label={`${title} empty workspace`} />
+      <div className="pane__body" aria-label={`${title} chat workspace`}>
+        <ChatPane pane={pane} />
+      </div>
     </section>
   );
 }

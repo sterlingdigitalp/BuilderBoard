@@ -13,6 +13,32 @@ Accepted
 
 ---
 
+### Phase 4A OpenAI Endpoint
+
+Decision:
+Use `POST https://api.openai.com/v1/chat/completions` with JSON body and `gpt-4o-mini` default model
+
+Reason:
+Matches the existing `LLMProvider` chat-shaped contract and supports both non-streaming and SSE streaming without adding tools or multimodal features
+
+Status:
+Accepted
+
+---
+
+### Phase 4A Execution Resolver
+
+Decision:
+Keep non-execution provider resolution unchanged and add a separate execution resolver that reads API keys through `CredentialService`
+
+Reason:
+UI/status flows can keep using credential handles while execution receives the secret only at the last responsible boundary
+
+Status:
+Accepted
+
+---
+
 ### Desktop Framework
 
 Decision:
@@ -202,6 +228,45 @@ Resolve OAuth accounts using the same `CredentialHandle` path as API-key account
 
 Reason:
 Provider adapters need one account resolution contract while `LLMProvider` remains unchanged
+
+Status:
+Accepted
+
+---
+
+### Phase 4A Message Lifecycle Commands
+
+Decision:
+Add `message_create`, `message_stream_update`, `message_complete`, and `message_error` as storage-layer commands; keep `message_append` for legacy complete inserts
+
+Reason:
+Streaming chat needs mutable assistant rows with explicit status transitions; provider execution (Phase 4B) will call these commands without changing the repository boundary
+
+Status:
+Accepted
+
+---
+
+### Phase 4A Assistant Placeholder
+
+Decision:
+`message_create` inserts user message (`complete`) and assistant placeholder (`pending`, empty content) atomically; assistant `parent_id` references the user message
+
+Reason:
+UI and provider layer need a stable assistant row ID before the first stream chunk arrives
+
+Status:
+Accepted
+
+---
+
+### Phase 4A Stream Updates
+
+Decision:
+`message_stream_update` appends `delta` to existing assistant `content` via SQL concatenation; first update transitions `pending` → `streaming`
+
+Reason:
+Incremental persistence matches provider chunk delivery without replacing prior content
 
 Status:
 Accepted

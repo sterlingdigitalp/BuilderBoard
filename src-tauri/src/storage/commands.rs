@@ -6,8 +6,9 @@ use crate::auth::CredentialService;
 use crate::storage::db::Database;
 use crate::storage::error::StorageError;
 use crate::storage::models::{
-    AccountDto, AccountStatusDto, AppendMessageRequest, CreatePaneRequest, MessageDto, PaneDto,
-    ProviderDto,
+    AccountDto, AccountStatusDto, AppendMessageRequest, CreatePaneRequest, MessageCompleteRequest,
+    MessageCreateRequest, MessageCreateResult, MessageDto, MessageErrorRequest,
+    MessageStreamUpdateRequest, PaneDto, ProviderDto,
 };
 use crate::storage::repositories::accounts::AccountRepository;
 use crate::storage::repositories::messages::MessageRepository;
@@ -95,6 +96,95 @@ pub fn message_append(
             )
         })
         .map_err(format_storage_error)
+}
+
+#[tauri::command]
+pub fn message_create(
+    database: State<'_, Arc<Database>>,
+    pane_id: String,
+    content: String,
+    content_type: Option<String>,
+    metadata_json: Option<String>,
+) -> Result<MessageCreateResult, String> {
+    message_create_with_database(
+        database.inner(),
+        MessageCreateRequest {
+            pane_id,
+            content,
+            content_type,
+            metadata_json,
+        },
+    )
+    .map_err(format_storage_error)
+}
+
+#[tauri::command]
+pub fn message_stream_update(
+    database: State<'_, Arc<Database>>,
+    message_id: String,
+    delta: String,
+) -> Result<MessageDto, String> {
+    database
+        .with_connection(|connection| {
+            MessageRepository::stream_update(
+                connection,
+                MessageStreamUpdateRequest { message_id, delta },
+            )
+        })
+        .map_err(format_storage_error)
+}
+
+#[tauri::command]
+pub fn message_complete(
+    database: State<'_, Arc<Database>>,
+    message_id: String,
+    content: Option<String>,
+    token_count_input: Option<i64>,
+    token_count_output: Option<i64>,
+    metadata_json: Option<String>,
+) -> Result<MessageDto, String> {
+    database
+        .with_connection(|connection| {
+            MessageRepository::mark_complete(
+                connection,
+                MessageCompleteRequest {
+                    message_id,
+                    content,
+                    token_count_input,
+                    token_count_output,
+                    metadata_json,
+                },
+            )
+        })
+        .map_err(format_storage_error)
+}
+
+#[tauri::command]
+pub fn message_error(
+    database: State<'_, Arc<Database>>,
+    message_id: String,
+    error_code: String,
+    error_message: String,
+) -> Result<MessageDto, String> {
+    database
+        .with_connection(|connection| {
+            MessageRepository::mark_error(
+                connection,
+                MessageErrorRequest {
+                    message_id,
+                    error_code,
+                    error_message,
+                },
+            )
+        })
+        .map_err(format_storage_error)
+}
+
+pub fn message_create_with_database(
+    database: &Database,
+    request: MessageCreateRequest,
+) -> Result<MessageCreateResult, StorageError> {
+    database.with_connection(|connection| MessageRepository::create_conversation_turn(connection, request))
 }
 
 #[tauri::command]

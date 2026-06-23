@@ -36,6 +36,10 @@ pub fn run() -> tauri::Result<()> {
             commands::pane_close,
             commands::message_list,
             commands::message_append,
+            commands::message_create,
+            commands::message_stream_update,
+            commands::message_complete,
+            commands::message_error,
             commands::account_create_api_key,
             commands::account_list,
             commands::account_disconnect,
@@ -112,6 +116,97 @@ mod integration_tests {
             let messages = MessageRepository::list_for_pane(conn, &pane_id)?;
             assert_eq!(messages.len(), 1);
             assert_eq!(messages[0].content, "hello");
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn message_lifecycle_persists_across_restart() -> StorageResult<()> {
+        use models::{
+            MessageCompleteRequest, MessageCreateRequest, MessageErrorRequest,
+            MessageStreamUpdateRequest,
+        };
+
+        let path = test_database_path("message-lifecycle-restart.db")?;
+        let _ = fs::remove_file(&path);
+
+        let (pane_id, errored_assistant_id) = {
+            let db = Database::initialize_at(path.clone())?;
+            db.with_connection(|conn| {
+                let pane = PaneRepository::create(
+                    conn,
+                    models::CreatePaneRequest {
+                        workspace_id: None,
+                        title: Some("Lifecycle".to_string()),
+                        sort_order: Some(0),
+                    },
+                )?;
+
+                let completed_turn = MessageRepository::create_conversation_turn(
+                    conn,
+                    MessageCreateRequest {
+                        pane_id: pane.id.clone(),
+                        content: "Complete path".to_string(),
+                        content_type: None,
+                        metadata_json: None,
+                    },
+                )?;
+                MessageRepository::stream_update(
+                    conn,
+                    MessageStreamUpdateRequest {
+                        message_id: completed_turn.assistant_message.id.clone(),
+                        delta: "Done".to_string(),
+                    },
+                )?;
+                MessageRepository::mark_complete(
+                    conn,
+                    MessageCompleteRequest {
+                        message_id: completed_turn.assistant_message.id,
+                        content: None,
+                        token_count_input: None,
+                        token_count_output: None,
+                        metadata_json: None,
+                    },
+                )?;
+
+                let error_turn = MessageRepository::create_conversation_turn(
+                    conn,
+                    MessageCreateRequest {
+                        pane_id: pane.id.clone(),
+                        content: "Error path".to_string(),
+                        content_type: None,
+                        metadata_json: None,
+                    },
+                )?;
+                MessageRepository::mark_error(
+                    conn,
+                    MessageErrorRequest {
+                        message_id: error_turn.assistant_message.id.clone(),
+                        error_code: "rate_limited".to_string(),
+                        error_message: "Too many requests".to_string(),
+                    },
+                )?;
+
+                Ok((pane.id, error_turn.assistant_message.id))
+            })?
+        };
+
+        let db = Database::initialize_at(path)?;
+        db.with_connection(|conn| {
+            let messages = MessageRepository::list_for_pane(conn, &pane_id)?;
+            assert_eq!(messages.len(), 4);
+
+            let completed_assistant = messages
+                .iter()
+                .find(|message| message.role == "assistant" && message.status == "complete")
+                .expect("completed assistant");
+            assert_eq!(completed_assistant.content, "Done");
+
+            let errored_assistant = messages
+                .iter()
+                .find(|message| message.id == errored_assistant_id)
+                .expect("errored assistant");
+            assert_eq!(errored_assistant.status, "error");
             Ok(())
         })
     }

@@ -29,7 +29,7 @@ pub struct GoogleOAuthCredentials {
     pub client_secret: String,
 }
 
-fn oauth_log(message: impl AsRef<str>) {
+pub(crate) fn oauth_log(message: impl AsRef<str>) {
     eprintln!("[OAuth] {}", message.as_ref());
 }
 

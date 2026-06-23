@@ -135,3 +135,44 @@ pub struct AppendMessageRequest {
     pub content_type: Option<String>,
     pub metadata_json: Option<String>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MessageCreateRequest {
+    pub pane_id: String,
+    pub content: String,
+    pub content_type: Option<String>,
+    pub metadata_json: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MessageCreateResult {
+    pub user_message: MessageDto,
+    pub assistant_message: MessageDto,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MessageStreamUpdateRequest {
+    pub message_id: String,
+    pub delta: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MessageCompleteRequest {
+    pub message_id: String,
+    pub content: Option<String>,
+    pub token_count_input: Option<i64>,
+    pub token_count_output: Option<i64>,
+    pub metadata_json: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MessageErrorRequest {
+    pub message_id: String,
+    pub error_code: String,
+    pub error_message: String,
+}

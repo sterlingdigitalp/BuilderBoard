@@ -30,7 +30,7 @@ interface AccountsSettingsState {
   createApiKeyAccount: (input: AccountCreateInput) => Promise<void>;
   connectGoogleOAuth: () => Promise<void>;
   disconnectAccount: (accountId: string) => Promise<void>;
-  reloadAccounts: () => Promise<void>;
+  reloadAccounts: (options?: { silent?: boolean }) => Promise<void>;
 }
 
 function errorMessage(error: unknown): string {
@@ -68,8 +68,11 @@ export function useAccountsSettings(): AccountsSettingsState {
 
   const visibleProviders = useMemo(() => supportedProviders(providers), [providers]);
 
-  const reloadAccounts = useCallback(async () => {
-    setIsLoading(true);
+  const reloadAccounts = useCallback(async (options?: { silent?: boolean }) => {
+    const silent = options?.silent === true;
+    if (!silent) {
+      setIsLoading(true);
+    }
     setError(null);
 
     try {
@@ -78,10 +81,14 @@ export function useAccountsSettings(): AccountsSettingsState {
       setAccounts(loadedAccounts);
     } catch (loadError) {
       setError(errorMessage(loadError));
-      setProviders([]);
-      setAccounts([]);
+      if (!silent) {
+        setProviders([]);
+        setAccounts([]);
+      }
     } finally {
-      setIsLoading(false);
+      if (!silent) {
+        setIsLoading(false);
+      }
     }
   }, []);
 
@@ -155,52 +162,79 @@ export function useAccountsSettings(): AccountsSettingsState {
     const cleanupFns: Array<() => void> = [];
 
     async function bindOAuthEvents() {
-      cleanupFns.push(
-        await listen("oauth_complete", (event) => {
-          const payload = toOAuthCompleteEvent(event.payload);
+      try {
+        cleanupFns.push(
+          await listen("oauth_complete", (event) => {
+            const payload = toOAuthCompleteEvent(event.payload);
 
-          if (!payload || payload.providerId !== "google" || !isActive) {
-            return;
-          }
+            if (!payload || payload.providerId !== "google" || !isActive) {
+              return;
+            }
 
-          setOAuthStatus("connected");
-          setOAuthMessage("Google account connected.");
-          void reloadAccounts();
-        })
-      );
+            setOAuthStatus("connected");
+            setOAuthMessage(
+              payload.label ? `Google account connected (${payload.label}).` : "Google account connected."
+            );
+            void reloadAccounts({ silent: true });
+          })
+        );
 
-      cleanupFns.push(
-        await listen("oauth_error", (event) => {
-          const payload = toOAuthErrorEvent(event.payload);
+        cleanupFns.push(
+          await listen("oauth_error", (event) => {
+            const payload = toOAuthErrorEvent(event.payload);
 
-          if (!payload || payload.providerId !== "google" || !isActive) {
-            return;
-          }
+            if (!payload || payload.providerId !== "google" || !isActive) {
+              return;
+            }
 
-          setOAuthStatus("error");
-          setOAuthMessage(payload.message ?? payload.errorCode ?? "Google OAuth failed.");
-        })
-      );
+            setOAuthStatus("error");
+            setOAuthMessage(payload.message ?? payload.errorCode ?? "Google OAuth failed.");
+          })
+        );
 
-      cleanupFns.push(
-        await listen("account_created", (event) => {
-          const account = toAccountDto(event.payload);
+        cleanupFns.push(
+          await listen("account_created", (event) => {
+            if (!isActive) {
+              return;
+            }
 
-          if (account.providerId !== "google" || !isActive) {
-            return;
-          }
+            try {
+              const account = toAccountDto(event.payload);
+              if (account.providerId !== "google" || account.status !== "active") {
+                return;
+              }
 
-          void reloadAccounts();
-        })
-      );
+              setAccounts((currentAccounts) => {
+                const withoutExisting = currentAccounts.filter((entry) => entry.id !== account.id);
+                const normalized = account.isDefault
+                  ? withoutExisting.map((entry) =>
+                      entry.providerId === account.providerId
+                        ? { ...entry, isDefault: false }
+                        : entry
+                    )
+                  : withoutExisting;
+                return [...normalized, account];
+              });
+              setOAuthStatus("connected");
+              setOAuthMessage(`Google account connected (${account.label}).`);
+            } catch {
+              void reloadAccounts({ silent: true });
+            }
+          })
+        );
 
-      cleanupFns.push(
-        await listen("account_status_changed", () => {
-          if (isActive) {
-            void reloadAccounts();
-          }
-        })
-      );
+        cleanupFns.push(
+          await listen("account_status_changed", () => {
+            if (isActive) {
+              void reloadAccounts({ silent: true });
+            }
+          })
+        );
+      } catch (bindError) {
+        setError(errorMessage(bindError));
+        setOAuthStatus("error");
+        setOAuthMessage("Could not subscribe to OAuth events.");
+      }
     }
 
     void bindOAuthEvents();

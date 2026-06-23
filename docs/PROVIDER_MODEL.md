@@ -1,6 +1,6 @@
 # Provider Model
 
-The provider model defines a stable abstraction for future LLM integrations. Phase 3B resolves provider stubs with API-key or OAuth credential handles without implementing real provider API behavior.
+The provider model defines a stable abstraction for future LLM integrations. Phase 4A keeps `LLMProvider` unchanged and adds real OpenAI execution for API-key accounts only.
 
 ## Core Trait
 
@@ -14,13 +14,33 @@ pub trait LLMProvider {
 }
 ```
 
-## Provider Stubs
+## Provider Implementations
 
 - `AnthropicProvider`: Placeholder for Anthropic integrations.
-- `OpenAIProvider`: Placeholder for OpenAI integrations.
+- `OpenAIProvider`: OpenAI Chat Completions implementation for API-key accounts.
 - `GoogleProvider`: Placeholder for Google integrations.
 
-The `send` and `stream` methods return `ProviderError::NotImplemented` today. The `list_models` method returns static placeholder model identifiers and performs no external calls.
+Anthropic and Google `send` and `stream` return `ProviderError::NotImplemented`. OpenAI `send` and `stream` execute real HTTPS requests when constructed through the execution resolver with an API key.
+
+## OpenAI Request Contract
+
+- Endpoint: `POST https://api.openai.com/v1/chat/completions`
+- Content-Type: `application/json`
+- Authorization: `Bearer <api key>`
+- Default model for `Model::OpenAIGpt`: `gpt-4o-mini`
+- Request body:
+
+```json
+{
+  "model": "gpt-4o-mini",
+  "messages": [
+    { "role": "user", "content": "Hello" }
+  ],
+  "stream": false
+}
+```
+
+Streaming uses the same endpoint with `"stream": true` and parses Server-Sent Events of the form `data: {...}` until `data: [DONE]`. Each `choices[0].delta.content` value becomes a normalized `StreamChunk`.
 
 ## Registry And Account Resolution
 
@@ -48,6 +68,8 @@ Account-aware resolution follows this order:
 
 `CredentialHandle` carries account metadata, `auth_type`, the opaque `credential_ref`, and optional OAuth expiry metadata. Provider stubs still do not receive raw API keys or OAuth tokens.
 
+OpenAI execution uses a separate resolver from the non-execution path. The execution resolver reads the API key from `CredentialService` and binds it to `OpenAIProvider`; raw keys are not returned in DTOs, events, logs, or frontend-facing data.
+
 ## Shared Types
 
 - `Provider`: Provider identifier enum with `Anthropic`, `OpenAI`, and `Google` variants.
@@ -67,4 +89,5 @@ Account-aware resolution follows this order:
 - Authentication and token storage remain outside provider implementations; providers receive only the resolved credential handle at construction/resolution boundaries.
 - Provider code must not directly persist conversations; persistence belongs to the `storage` boundary.
 - Streaming must return normalized `StreamChunk` values rather than provider-native events.
-- Registry and account resolution must not add provider API networking, streaming, or model execution.
+- Anthropic and Google execution remain out of scope.
+- OpenAI execution must not add tools, images, function calling, or file uploads.

@@ -1,0 +1,21 @@
+[[permission]]
+identifier = "allow-app-commands"
+description = "Allows BuilderBoard storage, account, and OAuth commands."
+commands.allow = [
+  "provider_list",
+  "pane_list",
+  "pane_create",
+  "pane_close",
+  "message_list",
+  "message_append",
+  "message_create",
+  "message_stream_update",
+  "message_complete",
+  "message_error",
+  "account_create_api_key",
+  "account_list",
+  "account_disconnect",
+  "account_get_status",
+  "oauth_start",
+  "oauth_cancel",
+]

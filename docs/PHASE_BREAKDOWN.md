@@ -206,14 +206,34 @@ See [PHASE3B_IMPLEMENTATION.md](./PHASE3B_IMPLEMENTATION.md).
 
 **Depends on:** Phase 3 (accounts), Phase 2B (message UI), Phase 1B (provider trait)
 
-### 4A: Provider Execution (Builder B)
+### 4A: Message Persistence and Streaming Backbone (Backend) ✅
+
+| Deliverable | Status | Description |
+|-------------|--------|-------------|
+| `message_create` | ✅ | User message + assistant placeholder in one transaction |
+| `message_stream_update` | ✅ | Append streaming deltas to assistant row |
+| `message_complete` | ✅ | Finalize assistant message with optional token counts |
+| `message_error` | ✅ | Record assistant failure with error fields |
+| Message status support | ✅ | `pending`, `streaming`, `complete`, `error` |
+
+See [PHASE4A_IMPLEMENTATION.md](./PHASE4A_IMPLEMENTATION.md).
+
+**Acceptance criteria:**
+
+- User message saved → assistant placeholder created → stream updates persist → completion persists
+- Conversation survives app restart via `message_list`
+- `message_append` remains for Phase 2A compatibility
+- No provider execution, OAuth changes, attachments, or tools
+
+### 4B: Provider Execution (Builder B)
 
 | Deliverable | Description |
 |-------------|-------------|
-| Live adapters | OpenAI, Anthropic HTTPS streaming |
-| `stream_chat` implementation | SSE/chunked response parsing |
-| Tauri events | `message_stream_chunk`, `message_stream_complete`, `message_stream_error` |
-| Token counting | Populate `token_count_input/output` |
+| OpenAI live adapter | ✅ API-key account execution via Chat Completions |
+| OpenAI `send` | ✅ Non-streaming Chat Completions request |
+| OpenAI `stream` | ✅ SSE parsing into `StreamChunk` |
+| Execution resolver | ✅ `CredentialHandle` → `CredentialService` → API key → `OpenAIProvider` |
+| Pane persistence bridge | ✅ Streaming chunks append to persisted assistant row |
 
 **Acceptance criteria:**
 
@@ -221,8 +241,10 @@ See [PHASE3B_IMPLEMENTATION.md](./PHASE3B_IMPLEMENTATION.md).
 - Streaming chunks arrive in UI in order
 - Error surfaces as `messages.status = error`
 - No credentials in logs or events
+- Anthropic and Google execution remain unimplemented
+- No tools, images, function calling, or file uploads
 
-### 4B: Chat UI (Builder A)
+### 4C: Chat UI (Builder A)
 
 | Deliverable | Description |
 |-------------|-------------|
@@ -237,7 +259,7 @@ See [PHASE3B_IMPLEMENTATION.md](./PHASE3B_IMPLEMENTATION.md).
 - Pane shows streaming indicator during response
 - Failed sends show actionable error
 
-### 4C: Provider Switching (Builder A + Backend)
+### 4D: Provider Switching (Builder A + Backend)
 
 | Deliverable | Description |
 |-------------|-------------|

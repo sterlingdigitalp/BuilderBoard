@@ -121,6 +121,16 @@ impl CredentialService {
         }
     }
 
+    pub fn read_api_key(&self, credential_ref: &str) -> StorageResult<String> {
+        let raw = self.store.read_payload(credential_ref)?;
+        match CredentialPayload::from_json(&raw)? {
+            CredentialPayload::ApiKey(credential) => Ok(credential.api_key),
+            CredentialPayload::OAuth(_) => Err(StorageError::InvalidInput(
+                "credential is not an api key".to_string(),
+            )),
+        }
+    }
+
     pub fn delete_credential(&self, credential_ref: &str) -> StorageResult<()> {
         self.store.delete_credential(credential_ref)
     }
@@ -178,6 +188,12 @@ impl CredentialStore for KeychainCredentialStore {
         entry.set_password(payload).map_err(|err| {
             StorageError::Keychain(format!(
                 "failed to store credential for BuilderBoard:{provider_id}:{label}: {err}"
+            ))
+        })?;
+
+        entry.get_password().map_err(|err| {
+            StorageError::Keychain(format!(
+                "credential write verification failed for BuilderBoard:{provider_id}:{label}: {err}"
             ))
         })?;
 

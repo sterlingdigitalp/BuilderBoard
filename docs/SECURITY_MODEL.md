@@ -123,6 +123,8 @@ Per [PROVIDER_MODEL.md](./PROVIDER_MODEL.md), provider implementations normalize
 | Report `ProviderError` (sanitized) | Execute shell commands from provider responses |
 | Expose provider-specific schemas only inside `providers/` | Read Keychain or `accounts` table directly |
 
+Phase 4A exception: the chat execution resolver reads OpenAI API keys through `CredentialService` and passes the secret directly into an execution-bound `OpenAIProvider`. The raw key must not cross Tauri IPC, be logged, be persisted outside Keychain, or be exposed in `ProviderRequest`.
+
 ### Persistence Layer
 
 | Allowed | Prohibited |

@@ -195,12 +195,13 @@ Stored in `providers.oauth_config_json` (public metadata only):
 }
 ```
 
-`client_id` is loaded from:
+`client_id` and `client_secret` are loaded from:
 
 1. `BUILDERBOARD_GOOGLE_CLIENT_ID` environment variable (development)
-2. Build-time embedded config (production)
+2. `BUILDERBOARD_GOOGLE_CLIENT_SECRET` environment variable (development)
+3. Build-time embedded config (production)
 
-No `client_secret` — PKCE public client model.
+Google **Desktop App** OAuth clients require `client_secret` in the token exchange POST body even when using PKCE ([native app docs](https://developers.google.com/identity/protocols/oauth2/native-app)). The secret is distributed with the desktop binary and is not sent to the frontend.
 
 Phase 3B requests identity scopes only (`openid`, `email`). The scope `https://www.googleapis.com/auth/generative-language` is not a valid Google OAuth scope and causes `invalid_scope` errors. Gemini API access scopes (`cloud-platform`, `generative-language.retriever`) are deferred to Phase 4 provider execution.
 

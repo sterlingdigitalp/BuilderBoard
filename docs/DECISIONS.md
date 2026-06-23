@@ -146,10 +146,10 @@ Accepted
 ### Phase 3B Google OAuth Client ID
 
 Decision:
-Load `client_id` from `BUILDERBOARD_GOOGLE_CLIENT_ID` env var (dev); no client secret (PKCE public client)
+Load `client_id` from `BUILDERBOARD_GOOGLE_CLIENT_ID` and `client_secret` from `BUILDERBOARD_GOOGLE_CLIENT_SECRET` (dev)
 
 Reason:
-Desktop-safe OAuth per OAUTH_DESIGN; secrets not embedded in distributed binary
+Google Desktop App OAuth requires `client_secret` in token exchange even with PKCE; secret stays in backend env/keychain config only, never in SQLite or IPC
 
 Status:
 Accepted

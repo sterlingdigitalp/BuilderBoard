@@ -40,11 +40,14 @@
 
 ## Configuration
 
-Set the Google OAuth client ID (public PKCE client, no secret):
+Set the Google OAuth Desktop App credentials from the downloaded `client_secret.json`:
 
 ```bash
 export BUILDERBOARD_GOOGLE_CLIENT_ID="your-client-id.apps.googleusercontent.com"
+export BUILDERBOARD_GOOGLE_CLIENT_SECRET="your-client-secret"
 ```
+
+Google Desktop App token exchange requires `client_secret` in the POST body alongside PKCE `code_verifier`.
 
 Redirect URI registered with Google must allow loopback: `http://127.0.0.1:<port>/callback`
 

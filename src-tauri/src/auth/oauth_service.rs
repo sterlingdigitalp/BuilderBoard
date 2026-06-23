@@ -21,6 +21,78 @@ use crate::storage::repositories::providers::{OAuthProviderConfig, ProviderRepos
 pub const OAUTH_CALLBACK_TIMEOUT: Duration = Duration::from_secs(300);
 pub const OAUTH_SUPPORTED_PROVIDERS: &[&str] = &["google"];
 pub const GOOGLE_CLIENT_ID_ENV: &str = "BUILDERBOARD_GOOGLE_CLIENT_ID";
+pub const GOOGLE_CLIENT_SECRET_ENV: &str = "BUILDERBOARD_GOOGLE_CLIENT_SECRET";
+
+#[derive(Debug, Clone)]
+pub struct GoogleOAuthCredentials {
+    pub client_id: String,
+    pub client_secret: String,
+}
+
+fn oauth_log(message: impl AsRef<str>) {
+    eprintln!("[OAuth] {}", message.as_ref());
+}
+
+fn oauth_log_response(stage: &str, status: u16, body: &str) {
+    oauth_log(format!(
+        "{stage}: {status} {}",
+        truncate_for_log(body, 240)
+    ));
+}
+
+fn truncate_for_log(value: &str, max_len: usize) -> String {
+    if value.len() <= max_len {
+        value.to_string()
+    } else {
+        format!("{}…", &value[..max_len])
+    }
+}
+
+fn mask_credential(value: &str) -> String {
+    if value.len() <= 8 {
+        "***".to_string()
+    } else {
+        format!("{}…{}", &value[..4], &value[value.len() - 4..])
+    }
+}
+
+fn log_token_exchange_request(
+    token_url: &str,
+    client_id: &str,
+    client_secret: &str,
+    redirect_uri: &str,
+    grant_type: &str,
+) {
+    oauth_log(format!("Token exchange endpoint: {token_url}"));
+    oauth_log("Token exchange Content-Type: application/x-www-form-urlencoded");
+    oauth_log(format!(
+        "Token exchange body fields: grant_type={grant_type}, client_id={} (present, len={}), client_secret={} (len={}), code=<redacted>, code_verifier=<redacted>, redirect_uri={redirect_uri}",
+        mask_credential(client_id),
+        client_id.len(),
+        if client_secret.is_empty() {
+            "MISSING".to_string()
+        } else {
+            format!("present ({})", mask_credential(client_secret))
+        },
+        client_secret.len(),
+    ));
+}
+
+fn log_refresh_token_request(token_url: &str, client_id: &str, client_secret: &str) {
+    oauth_log(format!("Token refresh endpoint: {token_url}"));
+    oauth_log("Token refresh Content-Type: application/x-www-form-urlencoded");
+    oauth_log(format!(
+        "Token refresh body fields: grant_type=refresh_token, client_id={} (present, len={}), client_secret={} (len={}), refresh_token=<redacted>",
+        mask_credential(client_id),
+        client_id.len(),
+        if client_secret.is_empty() {
+            "MISSING".to_string()
+        } else {
+            format!("present ({})", mask_credential(client_secret))
+        },
+        client_secret.len(),
+    ));
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TokenResponse {
@@ -49,6 +121,7 @@ pub trait OAuthHttpClient: Send + Sync {
         &self,
         token_url: &str,
         client_id: &str,
+        client_secret: &str,
         code: &str,
         code_verifier: &str,
         redirect_uri: &str,
@@ -58,6 +131,7 @@ pub trait OAuthHttpClient: Send + Sync {
         &self,
         token_url: &str,
         client_id: &str,
+        client_secret: &str,
         refresh_token: &str,
     ) -> StorageResult<TokenResponse>;
 
@@ -76,58 +150,94 @@ impl OAuthHttpClient for ReqwestOAuthClient {
         &self,
         token_url: &str,
         client_id: &str,
+        client_secret: &str,
         code: &str,
         code_verifier: &str,
         redirect_uri: &str,
     ) -> StorageResult<TokenResponse> {
+        log_token_exchange_request(
+            token_url,
+            client_id,
+            client_secret,
+            redirect_uri,
+            "authorization_code",
+        );
+
         let client = reqwest::blocking::Client::new();
         let response = client
             .post(token_url)
+            .header("Content-Type", "application/x-www-form-urlencoded")
             .form(&[
                 ("grant_type", "authorization_code"),
                 ("client_id", client_id),
+                ("client_secret", client_secret),
                 ("code", code),
                 ("code_verifier", code_verifier),
                 ("redirect_uri", redirect_uri),
             ])
             .send()
-            .map_err(|err| StorageError::InvalidInput(format!("token exchange request failed: {err}")))?;
+            .map_err(|err| {
+                oauth_log(format!("Token exchange request failed: {err}"));
+                StorageError::InvalidInput(format!("token exchange request failed: {err}"))
+            })?;
 
-        if !response.status().is_success() {
+        let status = response.status();
+        if !status.is_success() {
             let body = response.text().unwrap_or_default();
+            oauth_log_response("Token exchange response", status.as_u16(), &body);
             return Err(StorageError::InvalidInput(format!(
-                "token exchange failed: {body}"
+                "token exchange failed: {} {}",
+                status.as_u16(),
+                body
             )));
         }
 
+        oauth_log(format!("Token exchange response: {}", status.as_u16()));
         response
             .json::<TokenResponse>()
-            .map_err(|err| StorageError::InvalidInput(format!("invalid token response: {err}")))
+            .map_err(|err| {
+                oauth_log(format!("Token exchange parse failed: {err}"));
+                StorageError::InvalidInput(format!("invalid token response: {err}"))
+            })
     }
 
     fn refresh_token(
         &self,
         token_url: &str,
         client_id: &str,
+        client_secret: &str,
         refresh_token: &str,
     ) -> StorageResult<TokenResponse> {
+        log_refresh_token_request(token_url, client_id, client_secret);
+
         let client = reqwest::blocking::Client::new();
         let response = client
             .post(token_url)
+            .header("Content-Type", "application/x-www-form-urlencoded")
             .form(&[
                 ("grant_type", "refresh_token"),
                 ("client_id", client_id),
+                ("client_secret", client_secret),
                 ("refresh_token", refresh_token),
             ])
             .send()
-            .map_err(|err| StorageError::InvalidInput(format!("token refresh request failed: {err}")))?;
+            .map_err(|err| {
+                oauth_log(format!("Token refresh request failed: {err}"));
+                StorageError::InvalidInput(format!("token refresh request failed: {err}"))
+            })?;
 
-        if !response.status().is_success() {
+        let status = response.status();
+        if !status.is_success() {
             let body = response.text().unwrap_or_default();
+            oauth_log_response("Token refresh response", status.as_u16(), &body);
             return Err(StorageError::InvalidInput(format!(
-                "token refresh failed: {body}"
+                "token refresh failed: {} {}",
+                status.as_u16(),
+                body
             )));
         }
+
+        oauth_log(format!("Token refresh response: {}", status.as_u16()));
 
         response
             .json::<TokenResponse>()
@@ -140,18 +250,29 @@ impl OAuthHttpClient for ReqwestOAuthClient {
             .get(userinfo_url)
             .bearer_auth(access_token)
             .send()
-            .map_err(|err| StorageError::InvalidInput(format!("userinfo request failed: {err}")))?;
+            .map_err(|err| {
+                oauth_log(format!("Userinfo request failed: {err}"));
+                StorageError::InvalidInput(format!("userinfo request failed: {err}"))
+            })?;
 
-        if !response.status().is_success() {
+        let status = response.status();
+        if !status.is_success() {
             let body = response.text().unwrap_or_default();
+            oauth_log_response("Userinfo response", status.as_u16(), &body);
             return Err(StorageError::InvalidInput(format!(
-                "userinfo request failed: {body}"
+                "userinfo request failed: {} {}",
+                status.as_u16(),
+                body
             )));
         }
 
+        oauth_log(format!("Userinfo response: {}", status.as_u16()));
         response
             .json::<UserInfoResponse>()
-            .map_err(|err| StorageError::InvalidInput(format!("invalid userinfo response: {err}")))
+            .map_err(|err| {
+                oauth_log(format!("Userinfo parse failed: {err}"));
+                StorageError::InvalidInput(format!("invalid userinfo response: {err}"))
+            })
     }
 }
 
@@ -176,13 +297,15 @@ struct PendingOAuthSession {
     redirect_uri: String,
     oauth_config: OAuthProviderConfig,
     client_id: String,
+    client_secret: String,
     cancel_flag: Arc<AtomicBool>,
 }
 
 pub struct OAuthService<H: OAuthHttpClient = ReqwestOAuthClient, B: SystemBrowser = MacSystemBrowser> {
     http: H,
     browser: B,
-    client_id_resolver: Box<dyn Fn(&str) -> StorageResult<String> + Send + Sync>,
+    google_credentials_resolver:
+        Box<dyn Fn(&str) -> StorageResult<GoogleOAuthCredentials> + Send + Sync>,
     pending: Arc<Mutex<HashMap<String, PendingOAuthSession>>>,
 }
 
@@ -191,7 +314,7 @@ impl OAuthService {
         OAuthService {
             http: ReqwestOAuthClient,
             browser: MacSystemBrowser,
-            client_id_resolver: Box::new(resolve_google_client_id),
+            google_credentials_resolver: Box::new(resolve_google_credentials),
             pending: Arc::new(Mutex::new(HashMap::new())),
         }
     }
@@ -205,12 +328,14 @@ where
     pub fn with_dependencies(
         http: H,
         browser: B,
-        client_id_resolver: Box<dyn Fn(&str) -> StorageResult<String> + Send + Sync>,
+        google_credentials_resolver: Box<
+            dyn Fn(&str) -> StorageResult<GoogleOAuthCredentials> + Send + Sync,
+        >,
     ) -> Self {
         Self {
             http,
             browser,
-            client_id_resolver,
+            google_credentials_resolver,
             pending: Arc::new(Mutex::new(HashMap::new())),
         }
     }
@@ -229,7 +354,7 @@ where
         let oauth_config = database.with_connection(|connection| {
             ProviderRepository::get_oauth_config(connection, provider_id)
         })?;
-        let client_id = (self.client_id_resolver)(provider_id)?;
+        let google_credentials = (self.google_credentials_resolver)(provider_id)?;
 
         self.cancel_pending(provider_id);
 
@@ -239,6 +364,8 @@ where
         let listener = bind_loopback_listener()?;
         let port = listener.local_addr()?.port();
         let redirect_uri = format!("http://127.0.0.1:{port}/callback");
+        oauth_log(format!("Flow started for provider {provider_id}"));
+        oauth_log(format!("Loopback redirect_uri: {redirect_uri}"));
 
         let cancel_flag = Arc::new(AtomicBool::new(false));
         let session = PendingOAuthSession {
@@ -246,7 +373,8 @@ where
             code_verifier,
             redirect_uri: redirect_uri.clone(),
             oauth_config: oauth_config.clone(),
-            client_id: client_id.clone(),
+            client_id: google_credentials.client_id.clone(),
+            client_secret: google_credentials.client_secret.clone(),
             cancel_flag: Arc::clone(&cancel_flag),
         };
 
@@ -260,7 +388,7 @@ where
 
         let auth_url = build_authorization_url(
             &oauth_config.authorization_url,
-            &client_id,
+            &google_credentials.client_id,
             &redirect_uri,
             &oauth_config.scopes,
             &state,
@@ -269,7 +397,10 @@ where
 
         if open_browser {
             self.browser.open_url(&auth_url)?;
+            oauth_log("System browser launched");
         }
+
+        oauth_log("Waiting for loopback callback");
 
         let service = Arc::new(OAuthServiceRunner {
             http: self.http.clone(),
@@ -288,12 +419,21 @@ where
             });
 
             match result {
-                Ok(account) => on_complete(OAuthCompleteEvent {
-                    account_id: account.id.clone(),
-                    provider_id: account.provider_id.clone(),
-                    label: account.label.clone(),
-                }),
-                Err(error) => on_error(map_oauth_error(&provider_id_owned, error)),
+                Ok(account) => {
+                    oauth_log(format!(
+                        "Flow completed successfully: account_id={} label={}",
+                        account.id, account.label
+                    ));
+                    on_complete(OAuthCompleteEvent {
+                        account_id: account.id.clone(),
+                        provider_id: account.provider_id.clone(),
+                        label: account.label.clone(),
+                    })
+                }
+                Err(error) => {
+                    oauth_log(format!("Flow failed: {error}"));
+                    on_error(map_oauth_error(&provider_id_owned, error))
+                }
             }
         });
 
@@ -325,7 +465,7 @@ where
         let oauth_config = database.with_connection(|connection| {
             ProviderRepository::get_oauth_config(connection, &provider_id)
         })?;
-        let client_id = (self.client_id_resolver)(&provider_id)?;
+        let google_credentials = (self.google_credentials_resolver)(&provider_id)?;
         let credential = credentials.read_oauth_credential(&credential_ref)?;
 
         if !CredentialService::oauth_access_token_needs_refresh(&credential)? {
@@ -334,7 +474,8 @@ where
 
         let refreshed = self.http.refresh_token(
             &oauth_config.token_url,
-            &client_id,
+            &google_credentials.client_id,
+            &google_credentials.client_secret,
             &credential.refresh_token,
         )?;
 
@@ -368,6 +509,7 @@ where
     fn cancel_pending(&self, provider_id: &str) {
         if let Ok(mut pending) = self.pending.lock() {
             if let Some(session) = pending.remove(provider_id) {
+                oauth_log(format!("Cancelling pending flow for provider {provider_id}"));
                 session.cancel_flag.store(true, Ordering::SeqCst);
             }
         }
@@ -408,6 +550,8 @@ where
         provider_id: &str,
         callback: OAuthCallback,
     ) -> StorageResult<AccountDto> {
+        oauth_log("Callback received");
+
         let session = {
             let mut pending = self
                 .pending
@@ -415,33 +559,72 @@ where
                 .map_err(|_| StorageError::InvalidInput("oauth session lock poisoned".to_string()))?;
             pending.remove(provider_id).ok_or_else(|| {
                 StorageError::InvalidInput("oauth session not found".to_string())
-            })?
+            })
+        };
+
+        let session = match session {
+            Ok(session) => session,
+            Err(error) => {
+                oauth_log(format!("Pending session lookup failed: {error}"));
+                return Err(error);
+            }
         };
 
         if callback.state != session.state {
+            oauth_log("State mismatch");
             return Err(StorageError::InvalidInput("oauth state mismatch".to_string()));
         }
+        oauth_log("State validated");
+        oauth_log(format!(
+            "Exchanging token with redirect_uri: {}",
+            session.redirect_uri
+        ));
 
-        let token_response = self.http.exchange_code(
+        let token_response = match self.http.exchange_code(
             &session.oauth_config.token_url,
             &session.client_id,
+            &session.client_secret,
             &callback.code,
             &session.code_verifier,
             &session.redirect_uri,
-        )?;
+        ) {
+            Ok(response) => {
+                oauth_log("Token exchange succeeded");
+                response
+            }
+            Err(error) => {
+                oauth_log(format!("Token exchange failed: {error}"));
+                return Err(error);
+            }
+        };
 
-        let oauth_credential = CredentialService::oauth_credential_from_token_response(
+        let oauth_credential = match CredentialService::oauth_credential_from_token_response(
             token_response.access_token.clone(),
             token_response.refresh_token,
             token_response.token_type,
             token_response.expires_in,
             None,
-        )?;
+        ) {
+            Ok(credential) => credential,
+            Err(error) => {
+                oauth_log(format!("Credential payload build failed: {error}"));
+                return Err(error);
+            }
+        };
 
-        let userinfo = self.http.fetch_userinfo(
+        let userinfo = match self.http.fetch_userinfo(
             &session.oauth_config.userinfo_url,
             &oauth_credential.access_token,
-        )?;
+        ) {
+            Ok(info) => {
+                oauth_log("Userinfo request succeeded");
+                info
+            }
+            Err(error) => {
+                oauth_log(format!("Userinfo request failed: {error}"));
+                return Err(error);
+            }
+        };
 
         let label = userinfo
             .email
@@ -450,7 +633,16 @@ where
             .unwrap_or_else(|| "Google Account".to_string());
 
         let credential_ref = CredentialService::generate_credential_ref();
-        credentials.store_oauth_credential(&credential_ref, &label, provider_id, &oauth_credential)?;
+        if let Err(error) = credentials.store_oauth_credential(
+            &credential_ref,
+            &label,
+            provider_id,
+            &oauth_credential,
+        ) {
+            oauth_log(format!("Keychain storage failed: {error}"));
+            return Err(error);
+        }
+        oauth_log("Keychain entry created");
 
         match database.with_connection(|connection| {
             AccountRepository::create_oauth_account(
@@ -465,8 +657,12 @@ where
                 false,
             )
         }) {
-            Ok(account) => Ok(account),
+            Ok(account) => {
+                oauth_log(format!("Account creation succeeded: {}", account.id));
+                Ok(account)
+            }
             Err(error) => {
+                oauth_log(format!("Account creation failed: {error}"));
                 let _ = credentials.delete_credential(&credential_ref);
                 Err(error)
             }
@@ -496,20 +692,32 @@ where
 
     loop {
         if cancel_flag.load(Ordering::SeqCst) {
+            oauth_log("Flow cancelled");
             return Err(StorageError::InvalidInput("oauth flow cancelled".to_string()));
         }
 
         if std::time::Instant::now() >= deadline {
+            oauth_log("Flow timed out waiting for callback");
             return Err(StorageError::InvalidInput("oauth flow timed out".to_string()));
         }
 
         match listener.accept() {
             Ok((mut stream, peer)) => {
                 if !peer.ip().is_loopback() {
+                    oauth_log(format!("Rejected non-loopback connection from {}", peer.ip()));
                     continue;
                 }
 
-                let callback = read_oauth_callback(&mut stream)?;
+                oauth_log(format!("Loopback connection accepted from {}", peer));
+                let callback = match read_oauth_callback(&mut stream) {
+                    Ok(callback) => callback,
+                    Err(error) => {
+                        oauth_log(format!("Callback parse failed: {error}"));
+                        let _ = stream.write_all(error_response().as_bytes());
+                        let _ = stream.flush();
+                        return Err(error);
+                    }
+                };
                 let result = complete(callback);
                 let response_body = match &result {
                     Ok(_) => success_response(),
@@ -522,7 +730,10 @@ where
             Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
                 thread::sleep(Duration::from_millis(50));
             }
-            Err(err) => return Err(StorageError::from(err)),
+            Err(err) => {
+                oauth_log(format!("Loopback accept failed: {err}"));
+                return Err(StorageError::from(err));
+            }
         }
     }
 }
@@ -541,6 +752,10 @@ fn read_oauth_callback(stream: &mut TcpStream) -> StorageResult<OAuthCallback> {
     let params = parse_query(query);
 
     if let Some(error) = params.get("error") {
+        let description = params.get("error_description").map(String::as_str).unwrap_or("");
+        oauth_log(format!(
+            "Provider returned error in callback: {error} {description}"
+        ));
         return Err(StorageError::InvalidInput(format!(
             "oauth provider returned error: {error}"
         )));
@@ -635,11 +850,27 @@ fn bind_loopback_listener() -> StorageResult<TcpListener> {
     ))
 }
 
-pub fn resolve_google_client_id(_provider_id: &str) -> StorageResult<String> {
-    std::env::var(GOOGLE_CLIENT_ID_ENV).map_err(|_| {
+pub fn resolve_google_credentials(_provider_id: &str) -> StorageResult<GoogleOAuthCredentials> {
+    let client_id = std::env::var(GOOGLE_CLIENT_ID_ENV).map_err(|_| {
         StorageError::InvalidInput(format!(
             "missing Google OAuth client id; set {GOOGLE_CLIENT_ID_ENV}"
         ))
+    })?;
+    let client_secret = std::env::var(GOOGLE_CLIENT_SECRET_ENV).map_err(|_| {
+        StorageError::InvalidInput(format!(
+            "missing Google OAuth client secret; set {GOOGLE_CLIENT_SECRET_ENV} (required for Desktop App token exchange)"
+        ))
+    })?;
+
+    if client_id.trim().is_empty() || client_secret.trim().is_empty() {
+        return Err(StorageError::InvalidInput(
+            "Google OAuth client id and client secret must not be empty".to_string(),
+        ));
+    }
+
+    Ok(GoogleOAuthCredentials {
+        client_id,
+        client_secret,
     })
 }
 
@@ -744,10 +975,16 @@ mod tests {
             &self,
             _token_url: &str,
             _client_id: &str,
+            client_secret: &str,
             code: &str,
             code_verifier: &str,
             redirect_uri: &str,
         ) -> StorageResult<TokenResponse> {
+            if client_secret.is_empty() {
+                return Err(StorageError::InvalidInput(
+                    "mock exchange requires client_secret".to_string(),
+                ));
+            }
             *self
                 .last_exchange
                 .lock()
@@ -764,8 +1001,14 @@ mod tests {
             &self,
             _token_url: &str,
             _client_id: &str,
+            client_secret: &str,
             refresh_token: &str,
         ) -> StorageResult<TokenResponse> {
+            if client_secret.is_empty() {
+                return Err(StorageError::InvalidInput(
+                    "mock refresh requires client_secret".to_string(),
+                ));
+            }
             *self
                 .last_refresh
                 .lock()
@@ -798,7 +1041,12 @@ mod tests {
         let oauth = OAuthService::with_dependencies(
             http,
             browser,
-            Box::new(|_| Ok("test-client-id".to_string())),
+            Box::new(|_| {
+                Ok(GoogleOAuthCredentials {
+                    client_id: "test-client-id".to_string(),
+                    client_secret: "test-client-secret".to_string(),
+                })
+            }),
         );
         Ok((database, credentials, oauth))
     }

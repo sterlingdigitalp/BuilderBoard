@@ -83,14 +83,16 @@ Cross-builder integration occurs at Tauri command boundaries and shared DTO type
 
 **Depends on:** Phase 1A (pane types), Phase 1C (schema design)
 
-### 2A: SQLite Layer (Shared / Backend)
+### 2A: SQLite Layer (Shared / Backend) ✅
 
-| Deliverable | Description |
-|-------------|-------------|
-| `migrations/0001_initial_schema.sql` | Tables per DATABASE_DESIGN |
-| Migration runner | Startup-applied, `schema_migrations` ledger |
-| Repository modules | `workspaces`, `panes`, `messages`, `providers`, `accounts` |
-| Tauri commands | `pane_list`, `pane_create`, `pane_close`, `pane_update_layout`, `message_list`, `message_append` |
+| Deliverable | Status | Description |
+|-------------|--------|-------------|
+| `migrations/0001_initial_schema.sql` | ✅ | Tables per DATABASE_DESIGN |
+| Migration runner | ✅ | Startup-applied, `schema_migrations` ledger |
+| Repository modules | ✅ | `workspaces`, `panes`, `messages`, `providers` (`accounts` schema only) |
+| Tauri commands | ✅ | `pane_list`, `pane_create`, `pane_close`, `message_list`, `message_append` |
+
+See [PHASE2A_IMPLEMENTATION.md](./PHASE2A_IMPLEMENTATION.md).
 
 **Acceptance criteria:**
 
@@ -120,15 +122,17 @@ Cross-builder integration occurs at Tauri command boundaries and shared DTO type
 
 | Deliverable | Description |
 |-------------|-------------|
-| Registry loads from `providers` table | Map `provider_type` → `LLMProvider` implementation |
-| `provider_list` command | Returns enabled providers for UI picker |
-| `chat` boundary wiring | Load `Conversation` from `storage`, select provider by `panes.provider_id` |
+| Registry loads from `providers` table | ✅ Map `provider_type` → `LLMProvider` implementation for `anthropic`, `openai`, and `google` |
+| `provider_list` command | ✅ Returns enabled providers for UI picker |
+| `chat` boundary wiring | ✅ Selects provider by `panes.provider_id` without model execution |
 
 **Acceptance criteria:**
 
 - Provider list matches seeded rows
 - `chat` selects correct `LLMProvider` stub for pane's `provider_id`
 - Builder B does not modify `providers` schema or `LLMProvider` trait signature
+- Unsupported provider types return structured errors
+- No networking, OAuth, API keys, account handling, or streaming is introduced
 
 ---
 

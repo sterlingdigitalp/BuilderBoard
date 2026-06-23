@@ -1,6 +1,14 @@
+pub mod auth;
+pub mod chat;
+pub mod models;
+pub mod providers;
+pub mod sidecar;
+pub mod storage;
+
+pub use models::{Conversation, Message, Model};
+pub use providers::{AnthropicProvider, GoogleProvider, LLMProvider, OpenAIProvider, Provider};
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
-        .run(tauri::generate_context!())
-        .expect("failed to run BuilderBoard");
+    storage::run().expect("failed to run BuilderBoard");
 }

@@ -272,6 +272,7 @@ interface AccountDto {
   status: 'active' | 'expired' | 'revoked' | 'error';
   tokenExpiresAt: string | null;
   lastUsedAt: string | null;
+  isDefault: boolean;
 }
 ```
 

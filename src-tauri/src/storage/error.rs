@@ -7,6 +7,7 @@ pub enum StorageError {
     NotFound(String),
     InvalidInput(String),
     Io(std::io::Error),
+    Keychain(String),
 }
 
 impl fmt::Display for StorageError {
@@ -17,6 +18,7 @@ impl fmt::Display for StorageError {
             Self::NotFound(msg) => write!(f, "not found: {msg}"),
             Self::InvalidInput(msg) => write!(f, "invalid input: {msg}"),
             Self::Io(err) => write!(f, "io error: {err}"),
+            Self::Keychain(msg) => write!(f, "keychain error: {msg}"),
         }
     }
 }
@@ -32,6 +34,12 @@ impl From<rusqlite::Error> for StorageError {
 impl From<std::io::Error> for StorageError {
     fn from(value: std::io::Error) -> Self {
         Self::Io(value)
+    }
+}
+
+impl From<serde_json::Error> for StorageError {
+    fn from(value: serde_json::Error) -> Self {
+        Self::InvalidInput(format!("json error: {value}"))
     }
 }
 

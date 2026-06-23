@@ -1,6 +1,6 @@
 # Provider Model
 
-The provider model defines a stable abstraction for future LLM integrations. Phase 2C adds registry-backed provider resolution without implementing real API behavior.
+The provider model defines a stable abstraction for future LLM integrations. Phase 3A resolves provider stubs with account credential handles without implementing real API behavior.
 
 ## Core Trait
 
@@ -22,7 +22,7 @@ pub trait LLMProvider {
 
 The `send` and `stream` methods return `ProviderError::NotImplemented` today. The `list_models` method returns static placeholder model identifiers and performs no external calls.
 
-## Registry Resolution
+## Registry And Account Resolution
 
 Provider registry rows are loaded from SQLite via the storage provider repository. Resolution uses `provider_type`, not display name, to select an `LLMProvider` implementation.
 
@@ -32,9 +32,20 @@ Provider registry rows are loaded from SQLite via the storage provider repositor
 | `openai` | `OpenAIProvider` |
 | `google` | `GoogleProvider` |
 
-The Phase 2C resolver intentionally rejects non-MVP providers including `openrouter`, `ollama`, and `lmstudio`. Unsupported rows return a structured `ProviderResolutionError` with code `unsupported_provider`, preserving the provider id and provider type for callers.
+The Phase 3A resolver intentionally rejects non-MVP providers including `openrouter`, `ollama`, and `lmstudio`. Unsupported rows return a structured `ProviderResolutionError` with code `unsupported_provider`, preserving the provider id and provider type for callers.
 
-`provider_list` returns enabled registry rows for UI selection. It does not instantiate providers, read credentials, or call provider APIs.
+`provider_list` returns enabled registry rows for UI selection. It does not instantiate providers or call provider APIs.
+
+Account-aware resolution follows this order:
+
+1. Load the pane and enabled provider registry row.
+2. Use `pane.account_id` if present.
+3. Otherwise use `AccountRepository::get_default_for_provider`.
+4. Reject missing accounts with `no_account`.
+5. Reject non-active accounts with `inactive_account`.
+6. Create a `CredentialHandle` from account metadata and return it with the selected `LLMProvider` stub.
+
+`CredentialHandle` carries only account metadata and the opaque `credential_ref`; provider stubs still do not receive raw API keys or OAuth tokens.
 
 ## Shared Types
 
@@ -46,12 +57,13 @@ The Phase 2C resolver intentionally rejects non-MVP providers including `openrou
 - `ProviderResponse`: Normalized provider output.
 - `StreamChunk`: Normalized streaming delta placeholder.
 - `ProviderResolutionError`: Structured resolver error for unsupported, missing, or storage-backed provider resolution failures.
+- `ResolvedProvider`: Provider stub plus `CredentialHandle` returned by account-aware resolution.
 
 ## Boundary Rules
 
 - Provider implementations must not expose provider-specific request or response schemas outside the `providers` module boundary.
 - Provider implementations must normalize all output into shared `models` types before returning to callers.
-- Authentication and token storage must remain outside provider implementations until the `auth` boundary is implemented.
+- Authentication and token storage remain outside provider implementations; providers receive only the resolved credential handle at construction/resolution boundaries.
 - Provider code must not directly persist conversations; persistence belongs to the `storage` boundary.
 - Streaming must return normalized `StreamChunk` values rather than provider-native events.
-- Registry resolution must not add networking, OAuth, keychain access, account handling, streaming, or API-key logic.
+- Registry and account resolution must not add networking, OAuth, streaming, or model execution.

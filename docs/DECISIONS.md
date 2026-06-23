@@ -101,3 +101,42 @@ Match Phase 2A scope; additional providers deferred
 
 Status:
 Accepted
+
+---
+
+### Phase 3A Credential Store
+
+Decision:
+`keyring` crate with in-memory store for tests
+
+Reason:
+macOS Keychain integration with testable `CredentialStore` trait
+
+Status:
+Accepted
+
+---
+
+### Phase 3A Google API Keys
+
+Decision:
+Allow API-key accounts for `google` in Phase 3A despite OAuth-oriented seed metadata
+
+Reason:
+Phase 3A scope is API-key only; OAuth deferred to Phase 3B
+
+Status:
+Accepted
+
+---
+
+### Phase 3A Default Accounts
+
+Decision:
+`is_default` column per provider; one default per provider_id
+
+Reason:
+Pane resolution needs a stable default account per provider
+
+Status:
+Accepted

@@ -1,11 +1,23 @@
 import { Pane } from "../Pane";
+import { AccountsSettingsView } from "../Accounts";
 import { usePersistentPanes } from "../../hooks/usePersistentPanes";
+import { useShellView } from "../../hooks/useShellView";
 
 interface PaneGridProps {
   panes?: unknown[];
 }
 
 export function PaneGrid(_props: PaneGridProps) {
+  const view = useShellView();
+
+  if (view === "accounts") {
+    return <AccountsSettingsView />;
+  }
+
+  return <PersistentPaneGrid />;
+}
+
+function PersistentPaneGrid() {
   const { panes, isLoading, isMutating, error, createPane, closePane } = usePersistentPanes();
 
   if (isLoading) {

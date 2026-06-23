@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 
+use crate::auth::CredentialHandle;
 use crate::models::{Conversation, Message, Model};
 use crate::storage::models::ProviderDto;
 
@@ -56,6 +57,7 @@ pub struct ProviderResolutionError {
     pub code: String,
     pub provider_id: Option<String>,
     pub provider_type: Option<String>,
+    pub account_id: Option<String>,
     pub message: String,
 }
 
@@ -65,7 +67,41 @@ impl ProviderResolutionError {
             code: "provider_not_configured".to_string(),
             provider_id: None,
             provider_type: None,
+            account_id: None,
             message: "pane has no provider configured".to_string(),
+        }
+    }
+
+    pub fn no_account(provider_id: impl Into<String>, account_id: Option<String>) -> Self {
+        let provider_id = provider_id.into();
+        let message = match account_id.as_deref() {
+            Some(account_id) => format!("account '{account_id}' was not found for provider '{provider_id}'"),
+            None => format!("provider '{provider_id}' has no active account"),
+        };
+
+        Self {
+            code: "no_account".to_string(),
+            provider_id: Some(provider_id),
+            provider_type: None,
+            account_id,
+            message,
+        }
+    }
+
+    pub fn inactive_account(
+        provider_id: impl Into<String>,
+        account_id: impl Into<String>,
+        status: impl Into<String>,
+    ) -> Self {
+        let provider_id = provider_id.into();
+        let account_id = account_id.into();
+        let status = status.into();
+        Self {
+            code: "inactive_account".to_string(),
+            provider_id: Some(provider_id.clone()),
+            provider_type: None,
+            account_id: Some(account_id.clone()),
+            message: format!("account '{account_id}' for provider '{provider_id}' is not active: {status}"),
         }
     }
 
@@ -76,7 +112,8 @@ impl ProviderResolutionError {
             code: "unsupported_provider".to_string(),
             provider_id: Some(provider_id.clone()),
             provider_type: Some(provider_type.clone()),
-            message: format!("provider '{provider_id}' with type '{provider_type}' is not supported in Phase 2C"),
+            account_id: None,
+            message: format!("provider '{provider_id}' with type '{provider_type}' is not supported in Phase 3A"),
         }
     }
 
@@ -85,8 +122,20 @@ impl ProviderResolutionError {
             code: "storage_error".to_string(),
             provider_id: None,
             provider_type: None,
+            account_id: None,
             message,
         }
+    }
+}
+
+pub struct ResolvedProvider {
+    pub provider: Box<dyn LLMProvider>,
+    pub credential: CredentialHandle,
+}
+
+impl ResolvedProvider {
+    pub fn new(provider: Box<dyn LLMProvider>, credential: CredentialHandle) -> Self {
+        Self { provider, credential }
     }
 }
 
@@ -153,6 +202,14 @@ pub fn resolve_provider_for_registry_entry(
             provider.provider_type.clone(),
         )),
     }
+}
+
+pub fn resolve_provider_with_credential(
+    provider: &ProviderDto,
+    credential: CredentialHandle,
+) -> Result<ResolvedProvider, ProviderResolutionError> {
+    let provider = resolve_provider_for_registry_entry(provider)?;
+    Ok(ResolvedProvider::new(provider, credential))
 }
 
 fn not_implemented(provider: Provider) -> ProviderError {

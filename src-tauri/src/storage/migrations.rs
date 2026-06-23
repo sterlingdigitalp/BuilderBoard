@@ -8,9 +8,17 @@ use super::error::{StorageError, StorageResult};
 
 const MIGRATION_0001: &str =
     include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../migrations/0001_initial_schema.sql"));
+const MIGRATION_0002: &str =
+    include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../migrations/0002_accounts_is_default.sql"));
 
 #[cfg(test)]
 pub(crate) const MIGRATION_0001_FOR_TEST: &str = MIGRATION_0001;
+#[cfg(test)]
+pub(crate) const MIGRATIONS_FOR_TEST: &str = concat!(
+    include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../migrations/0001_initial_schema.sql")),
+    "\n",
+    include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../migrations/0002_accounts_is_default.sql")),
+);
 
 pub struct Migration {
     pub version: &'static str,
@@ -30,10 +38,16 @@ impl Default for MigrationRunner {
 impl MigrationRunner {
     pub fn new() -> Self {
         Self {
-            migrations: vec![Migration {
-                version: "0001_initial_schema",
-                sql: MIGRATION_0001,
-            }],
+            migrations: vec![
+                Migration {
+                    version: "0001_initial_schema",
+                    sql: MIGRATION_0001,
+                },
+                Migration {
+                    version: "0002_accounts_is_default",
+                    sql: MIGRATION_0002,
+                },
+            ],
         }
     }
 

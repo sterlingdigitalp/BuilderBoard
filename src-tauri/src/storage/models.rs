@@ -80,6 +80,32 @@ pub struct CreatePaneRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct AccountDto {
+    pub id: String,
+    pub provider_id: String,
+    pub label: String,
+    pub auth_type: String,
+    pub external_email: Option<String>,
+    pub status: String,
+    pub token_expires_at: Option<String>,
+    pub last_used_at: Option<String>,
+    pub is_default: bool,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountStatusDto {
+    pub account_id: String,
+    pub provider_id: String,
+    pub status: String,
+    pub token_expires_at: Option<String>,
+    pub is_default: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AppendMessageRequest {
     pub pane_id: String,
     pub role: String,

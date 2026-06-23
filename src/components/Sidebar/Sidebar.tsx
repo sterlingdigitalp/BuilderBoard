@@ -1,4 +1,5 @@
 import type { ThemeMode } from "../../types/layout";
+import { setShellView, useShellView } from "../../hooks/useShellView";
 
 interface SidebarProps {
   theme: ThemeMode;
@@ -6,6 +7,7 @@ interface SidebarProps {
 }
 
 export function Sidebar({ theme, onToggleTheme }: SidebarProps) {
+  const view = useShellView();
   const themeLabel = theme === "light" ? "Switch to dark theme" : "Switch to light theme";
 
   return (
@@ -14,10 +16,20 @@ export function Sidebar({ theme, onToggleTheme }: SidebarProps) {
         BB
       </div>
       <nav className="sidebar__nav" aria-label="Workspace sections">
-        <button className="sidebar__button sidebar__button--active" type="button" aria-label="Board">
+        <button
+          className={`sidebar__button${view === "board" ? " sidebar__button--active" : ""}`}
+          type="button"
+          aria-label="Board"
+          onClick={() => setShellView("board")}
+        >
           <span aria-hidden="true">□</span>
         </button>
-        <button className="sidebar__button" type="button" aria-label="Library">
+        <button
+          className={`sidebar__button${view === "accounts" ? " sidebar__button--active" : ""}`}
+          type="button"
+          aria-label="Accounts"
+          onClick={() => setShellView("accounts")}
+        >
           <span aria-hidden="true">◇</span>
         </button>
       </nav>

@@ -140,20 +140,27 @@ See [PHASE2A_IMPLEMENTATION.md](./PHASE2A_IMPLEMENTATION.md).
 
 **Depends on:** Phase 2 (persistence layer), Phase 1B (provider trait)
 
-### 3A: Credential Service (Backend)
+### 3A: Credential Service (Backend) ✅
 
-| Deliverable | Description |
-|-------------|-------------|
-| Keychain integration | Store/resolve/delete per SECURITY_MODEL |
-| `account_create_api_key` | API key path |
-| `account_list` / `account_disconnect` | Account management |
-| `accounts` repository | SQLite CRUD |
+| Deliverable | Status | Description |
+|-------------|--------|-------------|
+| Keychain integration | ✅ | `auth/credential_service.rs` |
+| `account_create_api_key` | ✅ | API key path with rollback on DB failure |
+| `account_list` / `account_disconnect` / `account_get_status` | ✅ | Account management commands |
+| `accounts` repository | ✅ | SQLite CRUD + `is_default` behavior |
+| Migration `0002_accounts_is_default` | ✅ | Default account column |
+| Account-aware provider resolution | ✅ | Explicit pane account or provider default account resolves to `CredentialHandle` + `LLMProvider` |
+
+See [PHASE3A_IMPLEMENTATION.md](./PHASE3A_IMPLEMENTATION.md).
 
 **Acceptance criteria:**
 
 - API key stored in Keychain, `credential_ref` in SQLite
 - API key never returned to frontend after creation
 - Disconnect removes keychain entry and sets `status = revoked`
+- Explicit pane account selection is honored before provider defaults
+- Missing, inactive, and unsupported-provider resolution failures return structured errors
+- No OAuth, networking, streaming, or model execution is introduced
 
 ### 3B: OAuth Flow (Backend)
 

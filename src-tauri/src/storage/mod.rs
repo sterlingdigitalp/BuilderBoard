@@ -7,6 +7,8 @@ pub mod repositories;
 
 use tauri::Manager;
 
+use crate::auth::CredentialService;
+
 use db::Database;
 
 pub fn run() -> tauri::Result<()> {
@@ -18,7 +20,9 @@ pub fn run() -> tauri::Result<()> {
                     error.to_string(),
                 ))
             })?;
+            let credentials = CredentialService::keychain();
             app.manage(database);
+            app.manage(credentials);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -28,6 +32,10 @@ pub fn run() -> tauri::Result<()> {
             commands::pane_close,
             commands::message_list,
             commands::message_append,
+            commands::account_create_api_key,
+            commands::account_list,
+            commands::account_disconnect,
+            commands::account_get_status,
         ])
         .run(tauri::generate_context!())
 }

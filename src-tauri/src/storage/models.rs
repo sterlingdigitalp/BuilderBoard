@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 pub const DEFAULT_WORKSPACE_ID: &str = "00000000-0000-4000-8000-000000000001";
+pub const SHELL_WORKSPACE_ID: &str = DEFAULT_WORKSPACE_ID;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -45,10 +46,21 @@ pub struct PaneDto {
     pub account_id: Option<String>,
     pub model_id: Option<String>,
     pub status: String,
+    pub project_id: Option<String>,
     pub layout_json: Option<String>,
     pub metadata_json: Option<String>,
+    pub header_display: PaneHeaderDisplayDto,
     pub created_at: String,
     pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PaneHeaderDisplayDto {
+    pub provider_label: Option<String>,
+    pub auth_label: Option<String>,
+    pub model_label: Option<String>,
+    pub reasoning_label: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -74,6 +86,7 @@ pub struct MessageDto {
 #[serde(rename_all = "camelCase")]
 pub struct CreatePaneRequest {
     pub workspace_id: Option<String>,
+    pub project_id: Option<String>,
     pub title: Option<String>,
     pub sort_order: Option<i32>,
 }
@@ -84,6 +97,7 @@ pub struct AccountDto {
     pub id: String,
     pub provider_id: String,
     pub label: String,
+    pub compact_label: String,
     pub auth_type: String,
     pub external_email: Option<String>,
     pub status: String,

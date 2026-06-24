@@ -347,10 +347,12 @@ mod tests {
         let _ = fs::remove_file(&path);
         let database = Database::initialize_at(path)?;
         let pane_id = database.with_connection(|connection| {
+            crate::storage::test_fixtures::seed_test_project(connection, "Messages")?;
             let pane = PaneRepository::create(
                 connection,
                 CreatePaneRequest {
                     workspace_id: None,
+                    project_id: None,
                     title: Some("Chat".to_string()),
                     sort_order: Some(0),
                 },
@@ -548,10 +550,12 @@ mod tests {
         let (pane_id, assistant_id) = {
             let database = Database::initialize_at(path.clone())?;
             database.with_connection(|connection| {
+                crate::storage::test_fixtures::seed_test_project(connection, "Restart")?;
                 let pane = PaneRepository::create(
                     connection,
                     CreatePaneRequest {
                         workspace_id: None,
+                        project_id: None,
                         title: Some("Restart".to_string()),
                         sort_order: Some(0),
                     },

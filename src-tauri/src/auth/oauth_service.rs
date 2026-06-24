@@ -19,15 +19,19 @@ use crate::storage::repositories::accounts::AccountRepository;
 use crate::storage::repositories::providers::{OAuthProviderConfig, ProviderRepository};
 
 pub const OAUTH_CALLBACK_TIMEOUT: Duration = Duration::from_secs(300);
-pub const OAUTH_SUPPORTED_PROVIDERS: &[&str] = &["google"];
+pub const OAUTH_SUPPORTED_PROVIDERS: &[&str] = &["google", "openai"];
 pub const GOOGLE_CLIENT_ID_ENV: &str = "BUILDERBOARD_GOOGLE_CLIENT_ID";
 pub const GOOGLE_CLIENT_SECRET_ENV: &str = "BUILDERBOARD_GOOGLE_CLIENT_SECRET";
+pub const OPENAI_CHATGPT_CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
+pub const OPENAI_CHATGPT_CALLBACK_PORT: u16 = 1455;
 
 #[derive(Debug, Clone)]
-pub struct GoogleOAuthCredentials {
+pub struct OAuthClientCredentials {
     pub client_id: String,
     pub client_secret: String,
 }
+
+pub type GoogleOAuthCredentials = OAuthClientCredentials;
 
 pub(crate) fn oauth_log(message: impl AsRef<str>) {
     eprintln!("[OAuth] {}", message.as_ref());
@@ -94,6 +98,8 @@ fn log_refresh_token_request(token_url: &str, client_id: &str, client_secret: &s
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TokenResponse {
     pub access_token: String,
+    #[serde(default)]
+    pub id_token: Option<String>,
     #[serde(default)]
     pub refresh_token: Option<String>,
     #[serde(default)]
@@ -164,18 +170,22 @@ impl OAuthHttpClient for ReqwestOAuthClient {
             "authorization_code",
         );
 
+        let mut form = vec![
+            ("grant_type", "authorization_code"),
+            ("client_id", client_id),
+            ("code", code),
+            ("code_verifier", code_verifier),
+            ("redirect_uri", redirect_uri),
+        ];
+        if !client_secret.trim().is_empty() {
+            form.push(("client_secret", client_secret));
+        }
+
         let client = reqwest::blocking::Client::new();
         let response = client
             .post(token_url)
             .header("Content-Type", "application/x-www-form-urlencoded")
-            .form(&[
-                ("grant_type", "authorization_code"),
-                ("client_id", client_id),
-                ("client_secret", client_secret),
-                ("code", code),
-                ("code_verifier", code_verifier),
-                ("redirect_uri", redirect_uri),
-            ])
+            .form(&form)
             .send()
             .map_err(|err| {
                 oauth_log(format!("Token exchange request failed: {err}"));
@@ -209,16 +219,20 @@ impl OAuthHttpClient for ReqwestOAuthClient {
     ) -> StorageResult<TokenResponse> {
         log_refresh_token_request(token_url, client_id, client_secret);
 
+        let mut form = vec![
+            ("grant_type", "refresh_token"),
+            ("client_id", client_id),
+            ("refresh_token", refresh_token),
+        ];
+        if !client_secret.trim().is_empty() {
+            form.push(("client_secret", client_secret));
+        }
+
         let client = reqwest::blocking::Client::new();
         let response = client
             .post(token_url)
             .header("Content-Type", "application/x-www-form-urlencoded")
-            .form(&[
-                ("grant_type", "refresh_token"),
-                ("client_id", client_id),
-                ("client_secret", client_secret),
-                ("refresh_token", refresh_token),
-            ])
+            .form(&form)
             .send()
             .map_err(|err| {
                 oauth_log(format!("Token refresh request failed: {err}"));
@@ -308,8 +322,8 @@ pub struct OAuthService<
 > {
     http: H,
     browser: B,
-    google_credentials_resolver:
-        Box<dyn Fn(&str) -> StorageResult<GoogleOAuthCredentials> + Send + Sync>,
+    oauth_credentials_resolver:
+        Box<dyn Fn(&str) -> StorageResult<OAuthClientCredentials> + Send + Sync>,
     pending: Arc<Mutex<HashMap<String, PendingOAuthSession>>>,
 }
 
@@ -318,7 +332,7 @@ impl OAuthService {
         OAuthService {
             http: ReqwestOAuthClient,
             browser: MacSystemBrowser,
-            google_credentials_resolver: Box::new(resolve_google_credentials),
+            oauth_credentials_resolver: Box::new(resolve_oauth_credentials),
             pending: Arc::new(Mutex::new(HashMap::new())),
         }
     }
@@ -332,14 +346,14 @@ where
     pub fn with_dependencies(
         http: H,
         browser: B,
-        google_credentials_resolver: Box<
-            dyn Fn(&str) -> StorageResult<GoogleOAuthCredentials> + Send + Sync,
+        oauth_credentials_resolver: Box<
+            dyn Fn(&str) -> StorageResult<OAuthClientCredentials> + Send + Sync,
         >,
     ) -> Self {
         Self {
             http,
             browser,
-            google_credentials_resolver,
+            oauth_credentials_resolver,
             pending: Arc::new(Mutex::new(HashMap::new())),
         }
     }
@@ -358,7 +372,7 @@ where
         let oauth_config = database.with_connection(|connection| {
             ProviderRepository::get_oauth_config(connection, provider_id)
         })?;
-        let google_credentials = (self.google_credentials_resolver)(provider_id)?;
+        let oauth_credentials = (self.oauth_credentials_resolver)(provider_id)?;
 
         self.cancel_pending(provider_id);
 
@@ -367,7 +381,14 @@ where
         let state = generate_state();
         let listener = bind_loopback_listener()?;
         let port = listener.local_addr()?.port();
-        let redirect_uri = format!("http://127.0.0.1:{port}/callback");
+        let (listener, redirect_uri) = if provider_id == "openai" {
+            (
+                bind_specific_loopback_listener(OPENAI_CHATGPT_CALLBACK_PORT)?,
+                format!("http://localhost:{OPENAI_CHATGPT_CALLBACK_PORT}/auth/callback"),
+            )
+        } else {
+            (listener, format!("http://127.0.0.1:{port}/callback"))
+        };
         oauth_log(format!("Flow started for provider {provider_id}"));
         oauth_log(format!("Loopback redirect_uri: {redirect_uri}"));
 
@@ -377,8 +398,8 @@ where
             code_verifier,
             redirect_uri: redirect_uri.clone(),
             oauth_config: oauth_config.clone(),
-            client_id: google_credentials.client_id.clone(),
-            client_secret: google_credentials.client_secret.clone(),
+            client_id: oauth_credentials.client_id.clone(),
+            client_secret: oauth_credentials.client_secret.clone(),
             cancel_flag: Arc::clone(&cancel_flag),
         };
 
@@ -389,14 +410,25 @@ where
             pending.insert(provider_id.to_string(), session);
         }
 
-        let auth_url = build_authorization_url(
-            &oauth_config.authorization_url,
-            &google_credentials.client_id,
-            &redirect_uri,
-            &oauth_config.scopes,
-            &state,
-            &code_challenge,
-        )?;
+        let auth_url = if provider_id == "openai" {
+            build_openai_chatgpt_authorization_url(
+                &oauth_config.authorization_url,
+                &oauth_credentials.client_id,
+                &redirect_uri,
+                &oauth_config.scopes,
+                &state,
+                &code_challenge,
+            )?
+        } else {
+            build_authorization_url(
+                &oauth_config.authorization_url,
+                &oauth_credentials.client_id,
+                &redirect_uri,
+                &oauth_config.scopes,
+                &state,
+                &code_challenge,
+            )?
+        };
 
         if open_browser {
             self.browser.open_url(&auth_url)?;
@@ -463,7 +495,7 @@ where
         let oauth_config = database.with_connection(|connection| {
             ProviderRepository::get_oauth_config(connection, &provider_id)
         })?;
-        let google_credentials = (self.google_credentials_resolver)(&provider_id)?;
+        let oauth_credentials = (self.oauth_credentials_resolver)(&provider_id)?;
         let credential = credentials.read_oauth_credential(&credential_ref)?;
 
         if !CredentialService::oauth_access_token_needs_refresh(&credential)? {
@@ -472,8 +504,8 @@ where
 
         let refreshed = self.http.refresh_token(
             &oauth_config.token_url,
-            &google_credentials.client_id,
-            &google_credentials.client_secret,
+            &oauth_credentials.client_id,
+            &oauth_credentials.client_secret,
             &credential.refresh_token,
         )?;
 
@@ -519,11 +551,12 @@ where
 
         database.with_connection(|connection| {
             let provider = ProviderRepository::get_enabled_by_id(connection, provider_id)?;
-            if provider.auth_mode != "oauth" {
+            if provider.auth_mode != "oauth" && provider_id != "openai" {
                 return Err(StorageError::InvalidInput(format!(
                     "provider {provider_id} is not configured for oauth"
                 )));
             }
+            ProviderRepository::get_oauth_config(connection, provider_id)?;
             Ok(())
         })
     }
@@ -596,8 +629,8 @@ where
 
         let oauth_credential = match CredentialService::oauth_credential_from_token_response(
             token_response.access_token.clone(),
-            token_response.refresh_token,
-            token_response.token_type,
+            token_response.refresh_token.clone(),
+            token_response.token_type.clone(),
             token_response.expires_in,
             None,
         ) {
@@ -608,17 +641,30 @@ where
             }
         };
 
-        let userinfo = match self.http.fetch_userinfo(
-            &session.oauth_config.userinfo_url,
-            &oauth_credential.access_token,
-        ) {
-            Ok(info) => {
-                oauth_log("Userinfo request succeeded");
-                info
+        let userinfo = if provider_id == "openai" {
+            match openai_userinfo_from_tokens(&token_response) {
+                Ok(info) => {
+                    oauth_log("OpenAI account metadata extracted from token claims");
+                    info
+                }
+                Err(error) => {
+                    oauth_log(format!("OpenAI token claim extraction failed: {error}"));
+                    return Err(error);
+                }
             }
-            Err(error) => {
-                oauth_log(format!("Userinfo request failed: {error}"));
-                return Err(error);
+        } else {
+            match self.http.fetch_userinfo(
+                &session.oauth_config.userinfo_url,
+                &oauth_credential.access_token,
+            ) {
+                Ok(info) => {
+                    oauth_log("Userinfo request succeeded");
+                    info
+                }
+                Err(error) => {
+                    oauth_log(format!("Userinfo request failed: {error}"));
+                    return Err(error);
+                }
             }
         };
 
@@ -626,7 +672,7 @@ where
             .email
             .clone()
             .or(userinfo.name.clone())
-            .unwrap_or_else(|| "Google Account".to_string());
+            .unwrap_or_else(|| default_oauth_account_label(provider_id));
 
         let credential_ref = CredentialService::generate_credential_ref();
         if let Err(error) = credentials.store_oauth_credential(
@@ -841,6 +887,26 @@ pub fn build_authorization_url(
     Ok(format!("{authorization_url}?{query}"))
 }
 
+pub fn build_openai_chatgpt_authorization_url(
+    authorization_url: &str,
+    client_id: &str,
+    redirect_uri: &str,
+    scopes: &[String],
+    state: &str,
+    code_challenge: &str,
+) -> StorageResult<String> {
+    let scope = scopes.join(" ");
+    let query = format!(
+        "response_type=code&client_id={}&redirect_uri={}&scope={}&state={}&code_challenge={}&code_challenge_method=S256&id_token_add_organizations=true&codex_cli_simplified_flow=true&originator=opencode",
+        urlencoding::encode(client_id),
+        urlencoding::encode(redirect_uri),
+        urlencoding::encode(&scope),
+        urlencoding::encode(state),
+        urlencoding::encode(code_challenge),
+    );
+    Ok(format!("{authorization_url}?{query}"))
+}
+
 fn bind_loopback_listener() -> StorageResult<TcpListener> {
     for port in 49152..65535 {
         let address = SocketAddr::from(([127, 0, 0, 1], port));
@@ -854,7 +920,21 @@ fn bind_loopback_listener() -> StorageResult<TcpListener> {
     ))
 }
 
-pub fn resolve_google_credentials(_provider_id: &str) -> StorageResult<GoogleOAuthCredentials> {
+fn bind_specific_loopback_listener(port: u16) -> StorageResult<TcpListener> {
+    TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], port))).map_err(StorageError::from)
+}
+
+pub fn resolve_oauth_credentials(provider_id: &str) -> StorageResult<OAuthClientCredentials> {
+    match provider_id {
+        "google" => resolve_google_credentials(provider_id),
+        "openai" => resolve_openai_credentials(provider_id),
+        other => Err(StorageError::InvalidInput(format!(
+            "provider {other} does not support OAuth"
+        ))),
+    }
+}
+
+pub fn resolve_google_credentials(_provider_id: &str) -> StorageResult<OAuthClientCredentials> {
     let client_id = std::env::var(GOOGLE_CLIENT_ID_ENV).map_err(|_| {
         StorageError::InvalidInput(format!(
             "missing Google OAuth client id; set {GOOGLE_CLIENT_ID_ENV}"
@@ -872,10 +952,93 @@ pub fn resolve_google_credentials(_provider_id: &str) -> StorageResult<GoogleOAu
         ));
     }
 
-    Ok(GoogleOAuthCredentials {
+    Ok(OAuthClientCredentials {
         client_id,
         client_secret,
     })
+}
+
+pub fn resolve_openai_credentials(_provider_id: &str) -> StorageResult<OAuthClientCredentials> {
+    Ok(OAuthClientCredentials {
+        client_id: OPENAI_CHATGPT_CLIENT_ID.to_string(),
+        client_secret: String::new(),
+    })
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAIClaims {
+    #[serde(default)]
+    sub: Option<String>,
+    #[serde(default)]
+    email: Option<String>,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    chatgpt_account_id: Option<String>,
+    #[serde(default)]
+    organizations: Vec<OpenAIOrganizationClaim>,
+    #[serde(default, rename = "https://api.openai.com/auth")]
+    openai_auth: Option<OpenAIAuthClaim>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAIOrganizationClaim {
+    id: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAIAuthClaim {
+    chatgpt_account_id: Option<String>,
+}
+
+fn openai_userinfo_from_tokens(tokens: &TokenResponse) -> StorageResult<UserInfoResponse> {
+    let claims = tokens
+        .id_token
+        .as_deref()
+        .and_then(parse_openai_claims)
+        .or_else(|| parse_openai_claims(&tokens.access_token))
+        .ok_or_else(|| {
+            StorageError::InvalidInput(
+                "OpenAI OAuth token did not include readable account claims".to_string(),
+            )
+        })?;
+
+    let account_id = claims
+        .chatgpt_account_id
+        .clone()
+        .or_else(|| claims.openai_auth.as_ref()?.chatgpt_account_id.clone())
+        .or_else(|| {
+            claims
+                .organizations
+                .first()
+                .map(|organization| organization.id.clone())
+        })
+        .or_else(|| claims.sub.clone())
+        .ok_or_else(|| {
+            StorageError::InvalidInput(
+                "OpenAI OAuth token did not include an account id".to_string(),
+            )
+        })?;
+
+    Ok(UserInfoResponse {
+        sub: account_id,
+        email: claims.email,
+        name: claims.name,
+    })
+}
+
+fn parse_openai_claims(token: &str) -> Option<OpenAIClaims> {
+    let payload = token.split('.').nth(1)?;
+    let decoded = URL_SAFE_NO_PAD.decode(payload).ok()?;
+    serde_json::from_slice(&decoded).ok()
+}
+
+fn default_oauth_account_label(provider_id: &str) -> String {
+    match provider_id {
+        "openai" => "OpenAI Account".to_string(),
+        "google" => "Google Account".to_string(),
+        other => format!("{other} Account"),
+    }
 }
 
 fn map_oauth_error(provider_id: &str, error: StorageError) -> OAuthErrorEvent {
@@ -942,6 +1105,7 @@ mod tests {
         token_response: TokenResponse,
         userinfo_response: UserInfoResponse,
         refresh_response: TokenResponse,
+        allow_empty_client_secret: bool,
         last_exchange: Arc<Mutex<Option<(String, String, String)>>>,
         last_refresh: Arc<Mutex<Option<String>>>,
     }
@@ -951,6 +1115,7 @@ mod tests {
             Self {
                 token_response: TokenResponse {
                     access_token: "access-token".to_string(),
+                    id_token: None,
                     refresh_token: Some("refresh-token".to_string()),
                     token_type: Some("Bearer".to_string()),
                     expires_in: Some(3600),
@@ -963,11 +1128,13 @@ mod tests {
                 },
                 refresh_response: TokenResponse {
                     access_token: "refreshed-access".to_string(),
+                    id_token: None,
                     refresh_token: None,
                     token_type: Some("Bearer".to_string()),
                     expires_in: Some(3600),
                     scope: Some("openid email".to_string()),
                 },
+                allow_empty_client_secret: false,
                 last_exchange: Arc::new(Mutex::new(None)),
                 last_refresh: Arc::new(Mutex::new(None)),
             }
@@ -984,7 +1151,7 @@ mod tests {
             code_verifier: &str,
             redirect_uri: &str,
         ) -> StorageResult<TokenResponse> {
-            if client_secret.is_empty() {
+            if client_secret.is_empty() && !self.allow_empty_client_secret {
                 return Err(StorageError::InvalidInput(
                     "mock exchange requires client_secret".to_string(),
                 ));
@@ -1006,7 +1173,7 @@ mod tests {
             client_secret: &str,
             refresh_token: &str,
         ) -> StorageResult<TokenResponse> {
-            if client_secret.is_empty() {
+            if client_secret.is_empty() && !self.allow_empty_client_secret {
                 return Err(StorageError::InvalidInput(
                     "mock refresh requires client_secret".to_string(),
                 ));
@@ -1047,14 +1214,24 @@ mod tests {
         let oauth = OAuthService::with_dependencies(
             http,
             browser,
-            Box::new(|_| {
-                Ok(GoogleOAuthCredentials {
-                    client_id: "test-client-id".to_string(),
-                    client_secret: "test-client-secret".to_string(),
-                })
+            Box::new(|provider_id| {
+                if provider_id == "openai" {
+                    resolve_openai_credentials(provider_id)
+                } else {
+                    Ok(OAuthClientCredentials {
+                        client_id: "test-client-id".to_string(),
+                        client_secret: "test-client-secret".to_string(),
+                    })
+                }
             }),
         );
         Ok((database, credentials, oauth))
+    }
+
+    fn test_jwt(payload: serde_json::Value) -> String {
+        let header = URL_SAFE_NO_PAD.encode(r#"{"alg":"none"}"#);
+        let body = URL_SAFE_NO_PAD.encode(payload.to_string());
+        format!("{header}.{body}.sig")
     }
 
     fn query_param<'a>(url: &'a str, key: &str) -> &'a str {
@@ -1072,19 +1249,14 @@ mod tests {
     }
 
     fn send_callback(redirect_uri: &str, code: &str, state: &str) -> StorageResult<()> {
-        let path = format!("/callback?code={code}&state={state}");
-        let request =
-            format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
-        let mut stream =
-            TcpStream::connect(redirect_uri.replace("http://", "").replace("/callback", ""))
-                .or_else(|_| {
-                    let port = redirect_uri
-                        .trim_start_matches("http://127.0.0.1:")
-                        .split('/')
-                        .next()
-                        .unwrap_or("0");
-                    TcpStream::connect(format!("127.0.0.1:{port}"))
-                })?;
+        let without_scheme = redirect_uri.trim_start_matches("http://");
+        let mut parts = without_scheme.splitn(2, '/');
+        let host = parts.next().unwrap_or("127.0.0.1:0");
+        let callback_path = format!("/{}", parts.next().unwrap_or("callback"));
+        let path = format!("{callback_path}?code={code}&state={state}");
+        let request = format!("GET {path} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n");
+        let connect_host = host.replace("localhost", "127.0.0.1");
+        let mut stream = TcpStream::connect(connect_host)?;
         stream.write_all(request.as_bytes())?;
         Ok(())
     }
@@ -1168,6 +1340,95 @@ mod tests {
             credentials.credential_exists(&database.with_connection(|connection| {
                 AccountRepository::credential_ref(connection, &accounts[0].id)
             })?,)?
+        );
+
+        assert!(error_rx.try_recv().is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn openai_oauth_flow_completes_with_callback() -> StorageResult<()> {
+        let mut http = MockHttpClient::google_defaults();
+        http.allow_empty_client_secret = true;
+        http.token_response.id_token = Some(test_jwt(serde_json::json!({
+            "email": "openai-user@example.com",
+            "name": "OpenAI User",
+            "https://api.openai.com/auth": {
+                "chatgpt_account_id": "acc-openai"
+            }
+        })));
+        http.userinfo_response = UserInfoResponse {
+            sub: "openai-subject".to_string(),
+            email: Some("openai-user@example.com".to_string()),
+            name: Some("OpenAI User".to_string()),
+        };
+        http.token_response.scope = Some("openid profile email offline_access".to_string());
+        let browser = MockBrowser::default();
+        let browser_urls = Arc::clone(&browser.opened);
+        let (database, credentials, oauth) =
+            setup_oauth_services("openai-oauth-flow-complete.db", http.clone(), browser)?;
+
+        let (complete_tx, complete_rx) = mpsc::channel();
+        let (error_tx, error_rx) = mpsc::channel();
+
+        let start = oauth_start_for_test(
+            Arc::clone(&database),
+            Arc::clone(&credentials),
+            &oauth,
+            "openai",
+            true,
+            move |event| {
+                let _ = complete_tx.send(event);
+            },
+            move |event| {
+                let _ = error_tx.send(event);
+            },
+        )?;
+
+        assert!(start.auth_url.contains("auth.openai.com"));
+        assert!(start
+            .auth_url
+            .contains("client_id=app_EMoamEEZ73f0CkXaXp7hrann"));
+        assert!(start.auth_url.contains("codex_cli_simplified_flow=true"));
+        assert!(start.auth_url.contains("id_token_add_organizations=true"));
+        assert!(start.auth_url.contains("originator=opencode"));
+        assert!(start.auth_url.contains("code_challenge_method=S256"));
+        assert_eq!(browser_urls.lock().unwrap().len(), 1);
+
+        let decoded_url = start.auth_url.replace("%3A", ":").replace("%2F", "/");
+        let redirect_uri = query_param(&decoded_url, "redirect_uri");
+        let state = query_param(&start.auth_url, "state");
+        let redirect_uri = urlencoding::decode(redirect_uri)
+            .unwrap_or_default()
+            .into_owned();
+        let state = urlencoding::decode(state).unwrap_or_default().into_owned();
+
+        thread::sleep(Duration::from_millis(100));
+        send_callback(&redirect_uri, "openai-auth-code", &state)?;
+
+        let event = complete_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("oauth_complete should fire");
+        assert_eq!(event.provider_id, "openai");
+        assert_eq!(event.label, "openai-user@example.com");
+
+        let accounts = database.with_connection(|connection| {
+            AccountRepository::list_active(connection, Some("openai"))
+        })?;
+        assert_eq!(accounts.len(), 1);
+        assert_eq!(accounts[0].auth_type, "oauth");
+        assert_eq!(
+            accounts[0].external_email.as_deref(),
+            Some("openai-user@example.com")
+        );
+        let external_account_id = database.with_connection(|connection| {
+            AccountRepository::external_account_id(connection, &accounts[0].id)
+        })?;
+        assert_eq!(external_account_id.as_deref(), Some("acc-openai"));
+        assert!(
+            credentials.credential_exists(&database.with_connection(|connection| {
+                AccountRepository::credential_ref(connection, &accounts[0].id)
+            })?)?
         );
 
         assert!(error_rx.try_recv().is_err());

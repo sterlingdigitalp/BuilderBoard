@@ -15,6 +15,7 @@ export interface PaneDto {
   accountId: string | null;
   modelId: string | null;
   status: PaneStatus;
+  projectId: string | null;
   layoutJson: string | null;
   metadataJson: string | null;
 }

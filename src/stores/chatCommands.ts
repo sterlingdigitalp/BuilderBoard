@@ -7,12 +7,16 @@ import type {
   MessageStatus,
   MessageStreamChunkEvent,
   MessageStreamCompleteEvent,
+  MessageStreamEnrichmentStartedEvent,
   MessageStreamErrorEvent,
   StreamChatInput
 } from "../types/chat";
 
 const messageRoles: MessageRole[] = ["system", "user", "assistant", "tool"];
 const messageStatuses: MessageStatus[] = ["pending", "streaming", "complete", "error"];
+const localMessageKey = "builderboard.localMessages.v1";
+
+type LocalMessageState = Record<string, MessageDto[]>;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -32,6 +36,59 @@ function messageStatus(value: unknown): MessageStatus {
   return typeof value === "string" && messageStatuses.includes(value as MessageStatus)
     ? (value as MessageStatus)
     : "error";
+}
+
+function nowIso(): string {
+  return new Date().toISOString();
+}
+
+function readLocalMessages(): LocalMessageState {
+  try {
+    const rawState = window.localStorage.getItem(localMessageKey);
+    if (!rawState) {
+      return {};
+    }
+
+    const parsed = JSON.parse(rawState);
+    return isRecord(parsed) ? (parsed as LocalMessageState) : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeLocalMessages(state: LocalMessageState): void {
+  window.localStorage.setItem(localMessageKey, JSON.stringify(state));
+}
+
+function localMessagesForPane(paneId: string): MessageDto[] {
+  return readLocalMessages()[paneId] ?? [];
+}
+
+function createLocalMessage(
+  paneId: string,
+  role: MessageRole,
+  content: string,
+  status: MessageStatus,
+  parentId: string | null
+): MessageDto {
+  const now = nowIso();
+
+  return {
+    id: `local-message-${crypto.randomUUID()}`,
+    workspaceId: "local",
+    paneId,
+    parentId,
+    role,
+    content,
+    contentType: "text",
+    status,
+    providerId: role === "assistant" ? "openai" : null,
+    accountId: null,
+    modelId: null,
+    metadataJson: "{}",
+    createdAt: now,
+    updatedAt: now
+  };
 }
 
 export function toMessageDto(value: unknown): MessageDto {
@@ -85,6 +142,19 @@ export function toMessageStreamChunkEvent(value: unknown): MessageStreamChunkEve
   };
 }
 
+export function toMessageStreamEnrichmentStartedEvent(
+  value: unknown
+): MessageStreamEnrichmentStartedEvent | null {
+  if (!isRecord(value) || typeof value.paneId !== "string" || typeof value.messageId !== "string") {
+    return null;
+  }
+
+  return {
+    paneId: value.paneId,
+    messageId: value.messageId
+  };
+}
+
 export function toMessageStreamCompleteEvent(value: unknown): MessageStreamCompleteEvent | null {
   if (!isRecord(value) || typeof value.paneId !== "string" || typeof value.messageId !== "string") {
     return null;
@@ -110,18 +180,35 @@ export function toMessageStreamErrorEvent(value: unknown): MessageStreamErrorEve
 }
 
 export async function messageList(paneId: string): Promise<MessageDto[]> {
-  const response = await invoke<unknown[]>("message_list", { paneId });
-  return response.map(toMessageDto);
+  try {
+    const response = await invoke<unknown[]>("message_list", { paneId });
+    return response.map(toMessageDto);
+  } catch {
+    return localMessagesForPane(paneId);
+  }
 }
 
 export async function messageCreate(input: MessageCreateInput): Promise<MessageCreateResult> {
-  const response = await invoke<unknown>("message_create", {
-    paneId: input.paneId,
-    content: input.content,
-    contentType: input.contentType ?? "text",
-    metadataJson: input.metadataJson ?? "{}"
-  });
-  return toMessageCreateResult(response);
+  try {
+    const response = await invoke<unknown>("message_create", {
+      paneId: input.paneId,
+      content: input.content,
+      contentType: input.contentType ?? "text",
+      metadataJson: input.metadataJson ?? "{}"
+    });
+    return toMessageCreateResult(response);
+  } catch {
+    const state = readLocalMessages();
+    const messages = state[input.paneId] ?? [];
+    const userMessage = createLocalMessage(input.paneId, "user", input.content, "complete", null);
+    const assistantMessage = createLocalMessage(input.paneId, "assistant", "", "pending", userMessage.id);
+
+    writeLocalMessages({
+      ...state,
+      [input.paneId]: [...messages, userMessage, assistantMessage]
+    });
+    return { userMessage, assistantMessage };
+  }
 }
 
 export async function messageStreamUpdate(messageId: string, delta: string): Promise<MessageDto> {
@@ -145,12 +232,44 @@ export async function messageError(
   errorCode: string,
   errorMessage: string
 ): Promise<MessageDto> {
-  const response = await invoke<unknown>("message_error", {
-    messageId,
-    errorCode,
-    errorMessage
-  });
-  return toMessageDto(response);
+  try {
+    const response = await invoke<unknown>("message_error", {
+      messageId,
+      errorCode,
+      errorMessage
+    });
+    return toMessageDto(response);
+  } catch {
+    const state = readLocalMessages();
+    let updatedMessage: MessageDto | null = null;
+    const nextState = Object.fromEntries(
+      Object.entries(state).map(([paneId, messages]) => [
+        paneId,
+        messages.map((message) => {
+          if (message.id !== messageId) {
+            return message;
+          }
+
+          updatedMessage = {
+            ...message,
+            status: "error",
+            content: errorMessage,
+            metadataJson: JSON.stringify({ errorCode }),
+            updatedAt: nowIso()
+          };
+          return updatedMessage;
+        })
+      ])
+    );
+
+    writeLocalMessages(nextState);
+
+    if (!updatedMessage) {
+      throw new Error(errorMessage);
+    }
+
+    return updatedMessage;
+  }
 }
 
 // Provider execution is intentionally delegated to the backend. Phase 4A UI consumes this

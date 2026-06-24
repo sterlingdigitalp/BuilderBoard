@@ -14,10 +14,13 @@
   flex-direction: column;
   align-items: center;
   width: 64px;
+  min-width: 64px;
+  max-width: 64px;
   height: 100%;
   padding: 12px 8px;
   border-right: 1px solid var(--sidebar-border);
   background: var(--sidebar-bg);
+  overflow: hidden;
 }
 
 .sidebar__brand {
@@ -56,6 +59,56 @@
   color: var(--button-active-fg);
 }
 
+.sidebar__projects {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  width: 100%;
+  min-height: 0;
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--sidebar-border);
+}
+
+.sidebar__projects-scroll {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  flex-wrap: nowrap;
+}
+
+.sidebar__project-button {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--sidebar-border);
+  border-radius: 8px;
+  background: var(--button-bg);
+  color: var(--button-fg);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+}
+
+.sidebar__project-button--active {
+  border-color: var(--button-active-bg);
+  box-shadow: inset 0 0 0 1px var(--button-active-bg);
+  background: var(--button-active-bg);
+  color: var(--button-active-fg);
+}
+
+.sidebar__project-button--create {
+  cursor: pointer;
+}
+
 .sidebar__theme {
   margin-top: auto;
   cursor: pointer;
@@ -64,21 +117,21 @@
 .workspace {
   min-width: 0;
   min-height: 0;
-  padding: 16px;
+  padding: 6px;
 }
 
 .pane-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   grid-template-rows: repeat(2, minmax(0, 1fr));
-  gap: 14px;
+  gap: 4px;
   width: 100%;
   height: 100%;
 }
 
 .pane {
   display: grid;
-  grid-template-rows: 44px minmax(0, 1fr);
+  grid-template-rows: 30px minmax(0, 1fr);
   min-width: 0;
   min-height: 0;
   overflow: hidden;
@@ -88,18 +141,50 @@
   box-shadow: var(--shadow);
 }
 
+.pane--focused {
+  border-color: var(--button-active-bg);
+  box-shadow: var(--shadow), 0 0 0 1px var(--button-active-bg);
+}
+
 .pane__header {
   display: flex;
   align-items: center;
-  padding: 0 14px;
+  gap: 4px;
+  min-width: 0;
+  padding: 2px 4px;
   border-bottom: 1px solid var(--pane-border);
   background: var(--pane-header-bg);
 }
 
 .pane__header h2 {
+  display: grid;
+  flex: 0 0 22px;
+  place-items: center;
   margin: 0;
-  font-size: 0.82rem;
+  font-size: 0.76rem;
   font-weight: 700;
+}
+
+.pane__icon-button {
+  display: grid;
+  flex: 0 0 24px;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--pane-border);
+  border-radius: 5px;
+  background: var(--button-bg);
+  color: var(--button-fg);
+  line-height: 1;
+}
+
+.pane__status {
+  flex: 0 0 auto;
+  color: var(--button-fg);
+  font-size: 0.65rem;
+  line-height: 1;
+  text-transform: lowercase;
 }
 
 .pane__body {
@@ -113,10 +198,10 @@
   }
 
   .workspace {
-    padding: 10px;
+    padding: 4px;
   }
 
   .pane-grid {
-    gap: 10px;
+    gap: 3px;
   }
 }

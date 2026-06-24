@@ -1,6 +1,6 @@
 export type MessageRole = "system" | "user" | "assistant" | "tool";
 export type MessageStatus = "pending" | "streaming" | "complete" | "error";
-export type ChatDisplayState = "idle" | "sending" | "streaming" | "error";
+export type ChatDisplayState = "idle" | "sending" | "enriching" | "streaming" | "error";
 
 export interface MessageDto {
   id: string;
@@ -55,4 +55,9 @@ export interface MessageStreamErrorEvent {
   messageId: string;
   errorCode?: string;
   message?: string;
+}
+
+export interface MessageStreamEnrichmentStartedEvent {
+  paneId: string;
+  messageId: string;
 }

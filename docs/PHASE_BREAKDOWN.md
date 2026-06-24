@@ -281,11 +281,28 @@ See [PHASE4A_IMPLEMENTATION.md](./PHASE4A_IMPLEMENTATION.md).
 
 ### 5A: Workspace Management (Builder A + Backend)
 
+#### 5A Validation (Audit — Complete)
+
+Architecture validation completed 2026-06-23. See [PHASE5A_VALIDATION.md](./PHASE5A_VALIDATION.md).
+
+| Validation item | Status |
+|-----------------|--------|
+| Workspace schema (`workspaces`, `panes.workspace_id`, `messages.workspace_id`) | ✅ |
+| `pane_list` workspace scoping | ✅ |
+| Message isolation via pane-scoped queries | ✅ |
+| No cross-workspace pane leakage (integration tests) | ✅ |
+| Restart persistence for per-workspace panes/messages | ✅ |
+| Accounts/credentials unaffected by workspace operations | ✅ |
+| `workspace_create` / `workspace_list` / `workspace_switch` commands | ⏳ Not implemented (out of validation scope) |
+| Sidebar workspace switch UI | ⏳ Not implemented (out of validation scope) |
+
+#### 5A Implementation (Remaining)
+
 | Deliverable | Description |
 |-------------|-------------|
 | `workspace_create` / `workspace_list` / `workspace_switch` | Multi-workspace commands |
 | Sidebar workspace list | Switch between workspaces |
-| Per-workspace pane sets | `workspace_id` scoping |
+| Per-workspace pane sets | `workspace_id` scoping in UI (`paneList(workspaceId)`) |
 
 **Acceptance criteria:**
 
@@ -293,18 +310,37 @@ See [PHASE4A_IMPLEMENTATION.md](./PHASE4A_IMPLEMENTATION.md).
 - Switching workspace loads correct panes and messages
 - Default workspace exists on fresh install
 
-### 5B: Message Metadata Enrichment (Builder B + Backend)
+### 5B: OAuth & Pane Settings (Builder A + Backend)
+
+#### 5B Validation (Audit — Complete)
+
+Architecture validation completed 2026-06-23. See [PHASE5B_VALIDATION.md](./PHASE5B_VALIDATION.md).
+
+| Validation item | Status |
+|-----------------|--------|
+| Google OAuth lifecycle (PKCE, callback, Keychain, refresh) | ✅ |
+| OpenAI OAuth | ⏳ Not implemented (API-key path only) |
+| Per-pane `model_id` schema | ✅ |
+| Per-pane model UI persistence (GPT-5.x) | ⏳ Types only (`paneSettings.ts`) |
+| Per-pane reasoning persistence (Low/Medium/High/XHigh) | ⏳ Not implemented |
+| Workspace pane-settings isolation (architecture) | ✅ |
+| Account/credential isolation vs workspaces | ✅ |
+
+#### 5B Implementation (Remaining)
 
 | Deliverable | Description |
 |-------------|-------------|
-| Full `metadata_json` population | Provider request IDs, latency, finish_reason |
-| Message regeneration | `regenerated_from` in metadata |
-| Export | Workspace export to JSON (no secrets) |
+| `pane_update_settings` command | Persist `model_id` + `metadata_json.reasoning_level` per pane |
+| Pane settings UI | Model + reasoning selectors wired to persistence |
+| OpenAI OAuth (optional future) | Provider OAuth config + `oauth_start` support |
+| Message metadata enrichment | Provider request IDs, latency, `finish_reason` |
+| Workspace export | JSON export (no secrets) |
 
 **Acceptance criteria:**
 
-- Metadata visible in message inspector (dev mode or settings)
-- Export file contains messages, not credentials
+- Each pane persists independent model and reasoning level across restart
+- No cross-pane or cross-workspace settings leakage
+- OAuth tokens remain in Keychain; pane settings in SQLite only
 
 ### 5C: Migration Hardening (Backend)
 

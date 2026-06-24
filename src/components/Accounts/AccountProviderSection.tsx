@@ -45,6 +45,10 @@ function metadataText(account: AccountDto): string {
   ].join(" · ");
 }
 
+function oauthButtonLabel(providerId: string): string {
+  return providerId === "openai" ? "Connect ChatGPT" : "Connect Google";
+}
+
 export function AccountProviderSection({
   accounts,
   provider,
@@ -56,7 +60,7 @@ export function AccountProviderSection({
   onDisconnect
 }: AccountProviderSectionProps) {
   const providerAccounts = accounts.filter((account) => account.providerId === provider.id);
-  const canConnectGoogle = provider.id === "google";
+  const canConnectOAuth = provider.id === "openai" || provider.id === "google";
 
   return (
     <section className="pane" aria-labelledby={`${provider.id}-accounts-title`}>
@@ -65,7 +69,7 @@ export function AccountProviderSection({
       </header>
       <div className="pane__body" style={{ display: "grid", gap: 14, overflow: "auto", padding: 14 }}>
         <AccountCreateForm provider={provider} isDisabled={isMutating} onCreate={onCreate} />
-        {canConnectGoogle ? (
+        {canConnectOAuth ? (
           <div
             style={{
               border: "1px solid var(--pane-border)",
@@ -76,7 +80,7 @@ export function AccountProviderSection({
             }}
           >
             <button type="button" disabled={isMutating || oauthStatus === "waiting"} onClick={() => void onConnectOAuth()}>
-              Connect Google
+              {oauthButtonLabel(provider.id)}
             </button>
             <span style={{ color: "var(--button-fg)", fontSize: "0.82rem" }}>
               OAuth Status: {oauthStatusLabel(oauthStatus)}

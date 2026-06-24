@@ -4,8 +4,11 @@ use std::sync::Mutex;
 
 use rusqlite::Connection;
 
+use crate::runtime_diagnostics::{runtime_trace_enabled, DatabaseLockSpan};
+
 use super::error::{StorageError, StorageResult};
 use super::migrations::MigrationRunner;
+use super::pane_project_migration;
 use super::repositories::providers::ProviderRepository;
 use super::repositories::workspaces::WorkspaceRepository;
 
@@ -26,6 +29,7 @@ impl Database {
 
         let runner = MigrationRunner::new();
         runner.run(&connection, &path, existed_before_open)?;
+        pane_project_migration::run_after_migrations(&connection)?;
         verify_seeds(&connection)?;
 
         Ok(Self {
@@ -46,11 +50,36 @@ impl Database {
         &self,
         operation: impl FnOnce(&Connection) -> StorageResult<T>,
     ) -> StorageResult<T> {
+        self.with_connection_labeled("unknown", operation)
+    }
+
+    pub fn with_connection_labeled<T>(
+        &self,
+        operation: &'static str,
+        callback: impl FnOnce(&Connection) -> StorageResult<T>,
+    ) -> StorageResult<T> {
+        let mut lock_span = if runtime_trace_enabled() {
+            Some(DatabaseLockSpan::waiting(operation))
+        } else {
+            None
+        };
+
         let connection = self
             .connection
             .lock()
             .map_err(|_| StorageError::Migration("database lock poisoned".to_string()))?;
-        operation(&connection)
+
+        if let Some(span) = lock_span.as_mut() {
+            span.acquired();
+        }
+
+        let result = callback(&connection);
+
+        if let Some(span) = lock_span {
+            span.finish();
+        }
+
+        result
     }
 }
 
@@ -64,6 +93,7 @@ fn configure_connection(connection: &Connection) -> StorageResult<()> {
 
 fn verify_seeds(connection: &Connection) -> StorageResult<()> {
     WorkspaceRepository::get_default(connection)?;
+    WorkspaceRepository::get_active(connection)?;
     let provider_count = ProviderRepository::count(connection)?;
     if provider_count != 3 {
         return Err(StorageError::Migration(format!(

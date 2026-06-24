@@ -4,8 +4,9 @@ use rusqlite::Connection;
 use crate::auth::{CredentialHandle, CredentialService};
 use crate::models::{Conversation, Message, MessageRole, Model};
 use crate::providers::{
-    resolve_openai_provider_with_api_key, resolve_provider_with_credential, LLMProvider,
-    ProviderError, ProviderRequest, ProviderResolutionError, ResolvedProvider,
+    resolve_openai_provider_with_api_key, resolve_openai_provider_with_bearer_token,
+    resolve_provider_with_credential, LLMProvider, OpenAIProvider, ProviderError,
+    ProviderRequest, ProviderResolutionError, ResolvedProvider,
 };
 use crate::storage::error::StorageError;
 use crate::storage::models::{
@@ -18,6 +19,13 @@ use crate::storage::repositories::panes::PaneRepository;
 use crate::storage::repositories::providers::ProviderRepository;
 
 pub struct ProviderResolutionService;
+
+#[derive(Clone, Debug)]
+pub struct PaneExecutionContext {
+    pub provider: ProviderDto,
+    pub credential: CredentialHandle,
+    pub oauth_external_account_id: Option<String>,
+}
 
 #[derive(Debug)]
 pub enum ChatExecutionError {
@@ -159,18 +167,118 @@ impl ProviderResolutionService {
             ));
         }
 
-        if credential.auth_type != "api_key" {
+        if credential.auth_type != "api_key" && credential.auth_type != "oauth" {
             return Err(ProviderResolutionError::storage(format!(
-                "OpenAI execution requires api_key auth, got {}",
+                "OpenAI execution requires api_key or oauth auth, got {}",
                 credential.auth_type
             )));
         }
 
-        let api_key = credentials
-            .read_api_key(&credential.credential_ref)
-            .map_err(|error| ProviderResolutionError::storage(error.to_string()))?;
+        match credential.auth_type.as_str() {
+            "api_key" => {
+                trace_execution_resolution(&provider, &credential);
+                trace_execution_step("CredentialService", "read_api_key invoked");
+                let api_key = credentials
+                    .read_api_key(&credential.credential_ref)
+                    .map_err(|error| ProviderResolutionError::storage(error.to_string()))?;
+                trace_execution_step("CredentialService", "API_KEY_LOADED=true");
+                resolve_openai_provider_with_api_key(&provider, &credential, api_key)
+            }
+            "oauth" => {
+                trace_execution_resolution(&provider, &credential);
+                trace_execution_step("CredentialService", "read_oauth_credential invoked");
+                let oauth_credential = credentials
+                    .read_oauth_credential(&credential.credential_ref)
+                    .map_err(|error| ProviderResolutionError::storage(error.to_string()))?;
+                trace_execution_step("CredentialService", "OAUTH_TOKEN_LOADED=true");
+                trace_execution_step("CredentialService", "API_KEY_LOADED=false");
+                let chatgpt_account_id =
+                    AccountRepository::external_account_id(connection, &credential.account_id)
+                        .map_err(|error| ProviderResolutionError::storage(error.to_string()))?;
+                resolve_openai_provider_with_bearer_token(
+                    &provider,
+                    &credential,
+                    oauth_credential.access_token,
+                    chatgpt_account_id,
+                )
+            }
+            other => Err(ProviderResolutionError::storage(format!(
+                "OpenAI execution requires api_key or oauth auth, got {other}"
+            ))),
+        }
+    }
 
-        resolve_openai_provider_with_api_key(&provider, &credential, api_key)
+    pub fn load_execution_context(
+        connection: &Connection,
+        pane_id: &str,
+    ) -> Result<PaneExecutionContext, ProviderResolutionError> {
+        let (provider, credential) = Self::resolve_provider_and_credential(connection, pane_id)?;
+        if provider.provider_type != "openai" {
+            return Err(ProviderResolutionError::unsupported_provider(
+                provider.id,
+                provider.provider_type,
+            ));
+        }
+
+        let oauth_external_account_id = if credential.auth_type == "oauth" {
+            AccountRepository::external_account_id(connection, &credential.account_id)
+                .map_err(|error| ProviderResolutionError::storage(error.to_string()))?
+        } else {
+            None
+        };
+
+        Ok(PaneExecutionContext {
+            provider,
+            credential,
+            oauth_external_account_id,
+        })
+    }
+
+    pub fn resolve_openai_provider(
+        context: PaneExecutionContext,
+        credentials: &CredentialService,
+    ) -> Result<OpenAIProvider, ProviderResolutionError> {
+        if context.provider.provider_type != "openai" {
+            return Err(ProviderResolutionError::unsupported_provider(
+                context.provider.id,
+                context.provider.provider_type,
+            ));
+        }
+
+        if context.credential.auth_type != "api_key" && context.credential.auth_type != "oauth" {
+            return Err(ProviderResolutionError::storage(format!(
+                "OpenAI execution requires api_key or oauth auth, got {}",
+                context.credential.auth_type
+            )));
+        }
+
+        match context.credential.auth_type.as_str() {
+            "api_key" => {
+                trace_execution_resolution(&context.provider, &context.credential);
+                trace_execution_step("CredentialService", "read_api_key invoked");
+                let api_key = credentials
+                    .read_api_key(&context.credential.credential_ref)
+                    .map_err(|error| ProviderResolutionError::storage(error.to_string()))?;
+                trace_execution_step("CredentialService", "API_KEY_LOADED=true");
+                Ok(OpenAIProvider::with_api_key(api_key))
+            }
+            "oauth" => {
+                trace_execution_resolution(&context.provider, &context.credential);
+                trace_execution_step("CredentialService", "read_oauth_credential invoked");
+                let oauth_credential = credentials
+                    .read_oauth_credential(&context.credential.credential_ref)
+                    .map_err(|error| ProviderResolutionError::storage(error.to_string()))?;
+                trace_execution_step("CredentialService", "OAUTH_TOKEN_LOADED=true");
+                trace_execution_step("CredentialService", "API_KEY_LOADED=false");
+                Ok(OpenAIProvider::with_chatgpt_oauth_token(
+                    oauth_credential.access_token,
+                    context.oauth_external_account_id,
+                ))
+            }
+            other => Err(ProviderResolutionError::storage(format!(
+                "OpenAI execution requires api_key or oauth auth, got {other}"
+            ))),
+        }
     }
 
     fn resolve_provider_and_credential(
@@ -270,6 +378,41 @@ impl ProviderResolutionService {
     }
 }
 
+fn trace_execution_enabled() -> bool {
+    std::env::var("BUILDERBOARD_TRACE_OPENAI_EXECUTION").as_deref() == Ok("1")
+}
+
+fn trace_execution_resolution(provider: &ProviderDto, credential: &CredentialHandle) {
+    if !trace_execution_enabled() {
+        return;
+    }
+
+    println!("ACCOUNT_ID={}", credential.account_id);
+    println!("AUTH_TYPE={}", credential.auth_type);
+    println!("PROVIDER_ID={}", provider.id);
+    println!(
+        "TRACE Provider -> Account -> CredentialHandle -> CredentialService -> Provider Adapter"
+    );
+    println!(
+        "TRACE Provider -> Account provider_id={} provider_type={}",
+        provider.id, provider.provider_type
+    );
+    println!(
+        "TRACE Account -> CredentialHandle account_id={} auth_type={}",
+        credential.account_id, credential.auth_type
+    );
+    println!(
+        "TRACE CredentialHandle -> CredentialService credential_ref_resolved=true auth_type={}",
+        credential.auth_type
+    );
+}
+
+fn trace_execution_step(component: &str, message: &str) {
+    if trace_execution_enabled() {
+        println!("TRACE {component} -> {message}");
+    }
+}
+
 fn is_expired(expires_at: &str) -> bool {
     chrono::DateTime::parse_from_rfc3339(expires_at)
         .map(|expires_at| expires_at.with_timezone(&Utc) <= Utc::now())
@@ -280,7 +423,11 @@ fn conversation_for_pane(
     connection: &Connection,
     pane_id: &str,
 ) -> Result<Conversation, StorageError> {
-    let mut conversation = Conversation::new(pane_id, Model::OpenAIGpt);
+    let pane = PaneRepository::get_open_by_id(connection, pane_id)?;
+    let mut conversation = Conversation::new(
+        pane_id,
+        openai_model_from_id(pane.model_id.as_deref().unwrap_or("OpenAIGpt")),
+    );
     for message in MessageRepository::list_for_pane(connection, pane_id)? {
         if message.role == "assistant" && message.status == "pending" && message.content.is_empty()
         {
@@ -291,6 +438,17 @@ fn conversation_for_pane(
         }
     }
     Ok(conversation)
+}
+
+fn openai_model_from_id(model_id: &str) -> Model {
+    match model_id {
+        "OpenAIGpt" | "gpt-4o-mini" => Model::OpenAIGpt,
+        "GPT-5.5" => Model::Custom("gpt-5.5".to_string()),
+        "GPT-5.4 mini" => Model::Custom("gpt-5.4-mini".to_string()),
+        "GPT-5.3 Codex Spark" => Model::Custom("gpt-5.3-codex-spark".to_string()),
+        "gpt-5.5" | "gpt-5.4-mini" | "gpt-5.3-codex-spark" => Model::Custom(model_id.to_string()),
+        other => Model::Custom(other.to_string()),
+    }
 }
 
 fn message_role(role: &str) -> Option<MessageRole> {
@@ -308,8 +466,10 @@ mod tests {
     use std::net::TcpListener;
     use std::thread;
 
+    use chrono::{Duration as ChronoDuration, Utc};
+
     use super::{ChatExecutionService, ProviderResolutionService};
-    use crate::auth::CredentialService;
+    use crate::auth::{CredentialService, OAuthCredential};
     use crate::models::Model;
     use crate::providers::OpenAIProvider;
     use crate::storage::error::StorageResult;
@@ -483,6 +643,50 @@ mod tests {
                 .expect("OpenAI execution provider should resolve with API key");
 
         assert_eq!(resolved.credential.account_id, "openai-exec");
+        assert_eq!(
+            resolved.provider.list_models().unwrap(),
+            vec![Model::OpenAIGpt]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn execution_resolver_binds_openai_oauth_token_from_credential_service() -> StorageResult<()> {
+        let conn = rusqlite::Connection::open_in_memory()?;
+        conn.execute_batch(crate::storage::migrations::MIGRATIONS_FOR_TEST)?;
+        let credentials = CredentialService::in_memory();
+        let credential_ref = "credential-ref-openai-oauth";
+        let oauth_credential = OAuthCredential {
+            access_token: "oauth-access-token".to_string(),
+            refresh_token: "oauth-refresh-token".to_string(),
+            token_type: "Bearer".to_string(),
+            expires_at: (Utc::now() + ChronoDuration::hours(1)).to_rfc3339(),
+        };
+        credentials.store_oauth_credential(
+            credential_ref,
+            "OpenAI OAuth",
+            "openai",
+            &oauth_credential,
+        )?;
+        let account = AccountRepository::create_oauth_account(
+            &conn,
+            "openai",
+            "OpenAI OAuth",
+            credential_ref,
+            "openai-subject",
+            Some("user@example.com"),
+            &oauth_credential.expires_at,
+            Some("openid email offline_access api"),
+            true,
+        )?;
+        let pane = create_bound_pane(&conn, "openai", Some(&account.id))?;
+
+        let resolved =
+            ProviderResolutionService::resolve_for_pane_execution(&conn, &pane.id, &credentials)
+                .expect("OpenAI execution provider should resolve with OAuth token");
+
+        assert_eq!(resolved.credential.account_id, account.id);
+        assert_eq!(resolved.credential.auth_type, "oauth");
         assert_eq!(
             resolved.provider.list_models().unwrap(),
             vec![Model::OpenAIGpt]
@@ -716,15 +920,23 @@ mod tests {
         Ok(())
     }
 
+    fn prepare_pane_test_connection(conn: &rusqlite::Connection) -> StorageResult<()> {
+        crate::storage::pane_project_migration::run_after_migrations(conn)?;
+        crate::storage::test_fixtures::seed_test_project(conn, "ChatProvider")?;
+        Ok(())
+    }
+
     fn create_bound_pane(
         conn: &rusqlite::Connection,
         provider_id: &str,
         account_id: Option<&str>,
     ) -> StorageResult<crate::storage::models::PaneDto> {
+        prepare_pane_test_connection(conn)?;
         let pane = PaneRepository::create(
             conn,
             CreatePaneRequest {
                 workspace_id: None,
+                project_id: None,
                 title: Some("Provider Pane".to_string()),
                 sort_order: None,
             },
@@ -741,10 +953,12 @@ mod tests {
         provider_id: &str,
         missing_account_id: &str,
     ) -> StorageResult<crate::storage::models::PaneDto> {
+        prepare_pane_test_connection(conn)?;
         let pane = PaneRepository::create(
             conn,
             CreatePaneRequest {
                 workspace_id: None,
+                project_id: None,
                 title: Some("Provider Pane".to_string()),
                 sort_order: None,
             },

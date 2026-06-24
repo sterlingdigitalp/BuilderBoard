@@ -7,7 +7,7 @@ use crate::storage::models::{AccountDto, AccountStatusDto};
 use crate::storage::repositories::providers::ProviderRepository;
 
 pub const API_KEY_SUPPORTED_PROVIDERS: &[&str] = &["openai", "anthropic", "google"];
-pub const OAUTH_SUPPORTED_PROVIDERS: &[&str] = &["google"];
+pub const OAUTH_SUPPORTED_PROVIDERS: &[&str] = &["google", "openai"];
 
 pub struct AccountRepository;
 
@@ -43,11 +43,13 @@ impl AccountRepository {
         }
 
         let provider = ProviderRepository::get_enabled_by_id(connection, provider_id)?;
-        if provider.auth_mode != "oauth" {
+        if provider.auth_mode != "oauth" && provider_id != "openai" {
             return Err(StorageError::InvalidInput(format!(
                 "provider {provider_id} is not configured for oauth"
             )));
         }
+
+        ProviderRepository::get_oauth_config(connection, provider_id)?;
 
         Ok(())
     }
@@ -313,6 +315,20 @@ impl AccountRepository {
             .ok_or_else(|| StorageError::NotFound(format!("account {account_id} not found")))
     }
 
+    pub fn external_account_id(
+        connection: &Connection,
+        account_id: &str,
+    ) -> StorageResult<Option<String>> {
+        connection
+            .query_row(
+                "SELECT external_account_id FROM accounts WHERE id = ?1",
+                [account_id],
+                |row| row.get(0),
+            )
+            .optional()?
+            .ok_or_else(|| StorageError::NotFound(format!("account {account_id} not found")))
+    }
+
     pub fn revoke(connection: &Connection, account_id: &str) -> StorageResult<String> {
         let credential_ref = Self::credential_ref(connection, account_id)?;
         let account = Self::get_by_id(connection, account_id)?;
@@ -424,11 +440,14 @@ impl AccountRepository {
 }
 
 fn map_account_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AccountDto> {
+    let provider_id: String = row.get(1)?;
+    let auth_type: String = row.get(3)?;
     Ok(AccountDto {
         id: row.get(0)?,
-        provider_id: row.get(1)?,
+        provider_id: provider_id.clone(),
         label: row.get(2)?,
-        auth_type: row.get(3)?,
+        compact_label: compact_account_label(&provider_id, &auth_type),
+        auth_type,
         external_email: row.get(4)?,
         status: row.get(5)?,
         token_expires_at: row.get(6)?,
@@ -437,6 +456,15 @@ fn map_account_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AccountDto> {
         created_at: row.get(9)?,
         updated_at: row.get(10)?,
     })
+}
+
+pub fn compact_account_label(provider_id: &str, auth_type: &str) -> String {
+    match (provider_id, auth_type) {
+        (_, "api_key") => "API Key".to_string(),
+        ("openai", "oauth") => "ChatGPT".to_string(),
+        (_, "oauth") => "OAuth".to_string(),
+        (_, other) => other.to_string(),
+    }
 }
 
 #[cfg(test)]
@@ -522,6 +550,42 @@ mod tests {
         let account = AccountRepository::get_default_for_provider(&conn, "openai")?;
 
         assert!(account.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn account_dto_includes_compact_display_label() -> StorageResult<()> {
+        let conn = setup_connection();
+        let api_key = AccountRepository::create_api_key_account(
+            &conn,
+            "openai",
+            "sterlingdigitalp@gmail.com (API Key) (default)",
+            "cred-api",
+            true,
+        )?;
+        let oauth = AccountRepository::create_oauth_account(
+            &conn,
+            "openai",
+            "sterlingdigitalp@gmail.com (OAuth) (default)",
+            "cred-oauth",
+            "chatgpt-account",
+            Some("sterlingdigitalp@gmail.com"),
+            &Utc::now().to_rfc3339(),
+            Some("openid profile email offline_access"),
+            false,
+        )?;
+
+        assert_eq!(
+            api_key.label,
+            "sterlingdigitalp@gmail.com (API Key) (default)"
+        );
+        assert_eq!(api_key.compact_label, "API Key");
+        assert_eq!(oauth.label, "sterlingdigitalp@gmail.com (OAuth) (default)");
+        assert_eq!(
+            oauth.external_email.as_deref(),
+            Some("sterlingdigitalp@gmail.com")
+        );
+        assert_eq!(oauth.compact_label, "ChatGPT");
         Ok(())
     }
 }

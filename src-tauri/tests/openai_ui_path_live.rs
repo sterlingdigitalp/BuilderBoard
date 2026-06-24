@@ -4,7 +4,8 @@ use std::sync::{
 };
 
 use builderboard_lib::auth::CredentialService;
-use builderboard_lib::storage::commands::{message_create_with_database, stream_chat_with_services};
+use builderboard_lib::storage::commands::message_create_with_database;
+use builderboard_lib::stream_execution::stream_chat_with_services;
 use builderboard_lib::storage::db::Database;
 use builderboard_lib::storage::error::{StorageError, StorageResult};
 use builderboard_lib::storage::models::{CreatePaneRequest, MessageCreateRequest};
@@ -56,6 +57,7 @@ fn live_ui_path_stream_chat_persists_and_emits_events() -> StorageResult<()> {
             connection,
             CreatePaneRequest {
                 workspace_id: None,
+                project_id: None,
                 title: Some("Phase 4B UI path validation".to_string()),
                 sort_order: None,
             },
@@ -97,6 +99,7 @@ fn live_ui_path_stream_chat_persists_and_emits_events() -> StorageResult<()> {
         &account_id,
         "OpenAIGpt",
         &assistant_id,
+        None,
     )
     .map_err(|error| StorageError::InvalidInput(format!("stream_chat failed: {error}")))?;
 
@@ -111,9 +114,8 @@ fn live_ui_path_stream_chat_persists_and_emits_events() -> StorageResult<()> {
     assert!(chunk_count > 0, "expected message_stream_chunk events");
     assert!(complete_count > 0, "expected message_stream_complete event");
 
-    let assistant_after_stream = database.with_connection(|connection| {
-        MessageRepository::get_by_id(connection, &assistant_id)
-    })?;
+    let assistant_after_stream = database
+        .with_connection(|connection| MessageRepository::get_by_id(connection, &assistant_id))?;
 
     println!("PHASE4B_ASSISTANT_STATUS={}", assistant_after_stream.status);
     let response_preview: String = assistant_after_stream.content.chars().take(240).collect();

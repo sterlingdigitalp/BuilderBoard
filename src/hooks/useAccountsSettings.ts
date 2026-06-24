@@ -18,6 +18,8 @@ import type {
 } from "../types/accounts";
 
 const supportedProviderIds = ["openai", "anthropic", "google"];
+const oauthProviderIds = ["openai", "google"];
+type OAuthProviderId = "openai" | "google";
 
 interface AccountsSettingsState {
   accounts: AccountDto[];
@@ -25,9 +27,10 @@ interface AccountsSettingsState {
   isLoading: boolean;
   isMutating: boolean;
   error: string | null;
-  oauthStatus: OAuthConnectionStatus;
-  oauthMessage: string | null;
+  oauthStatuses: Record<OAuthProviderId, OAuthConnectionStatus>;
+  oauthMessages: Record<OAuthProviderId, string | null>;
   createApiKeyAccount: (input: AccountCreateInput) => Promise<void>;
+  connectOpenAiOAuth: () => Promise<void>;
   connectGoogleOAuth: () => Promise<void>;
   disconnectAccount: (accountId: string) => Promise<void>;
   reloadAccounts: (options?: { silent?: boolean }) => Promise<void>;
@@ -63,8 +66,14 @@ export function useAccountsSettings(): AccountsSettingsState {
   const [isLoading, setIsLoading] = useState(true);
   const [isMutating, setIsMutating] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [oauthStatus, setOAuthStatus] = useState<OAuthConnectionStatus>("idle");
-  const [oauthMessage, setOAuthMessage] = useState<string | null>(null);
+  const [oauthStatuses, setOAuthStatuses] = useState<Record<OAuthProviderId, OAuthConnectionStatus>>({
+    openai: "idle",
+    google: "idle"
+  });
+  const [oauthMessages, setOAuthMessages] = useState<Record<OAuthProviderId, string | null>>({
+    openai: null,
+    google: null
+  });
 
   const visibleProviders = useMemo(() => supportedProviders(providers), [providers]);
 
@@ -115,23 +124,37 @@ export function useAccountsSettings(): AccountsSettingsState {
     }
   }, []);
 
-  const connectGoogleOAuth = useCallback(async () => {
+  const setOAuthState = useCallback(
+    (providerId: OAuthProviderId, status: OAuthConnectionStatus, message: string | null) => {
+      setOAuthStatuses((currentStatuses) => ({ ...currentStatuses, [providerId]: status }));
+      setOAuthMessages((currentMessages) => ({ ...currentMessages, [providerId]: message }));
+    },
+    []
+  );
+
+  const connectOAuth = useCallback(async (providerId: OAuthProviderId) => {
     setIsMutating(true);
     setError(null);
-    setOAuthStatus("starting");
-    setOAuthMessage("Opening Google sign-in.");
+    setOAuthState(providerId, "starting", providerId === "openai" ? "Opening ChatGPT sign-in." : "Opening Google sign-in.");
 
     try {
-      await oauthStart("google");
-      setOAuthStatus("waiting");
-      setOAuthMessage("Waiting for Google authorization to complete.");
+      await oauthStart(providerId);
+      setOAuthState(
+        providerId,
+        "waiting",
+        providerId === "openai"
+          ? "Waiting for ChatGPT authorization to complete."
+          : "Waiting for Google authorization to complete."
+      );
     } catch (connectError) {
-      setOAuthStatus("error");
-      setOAuthMessage(errorMessage(connectError));
+      setOAuthState(providerId, "error", errorMessage(connectError));
     } finally {
       setIsMutating(false);
     }
-  }, []);
+  }, [setOAuthState]);
+
+  const connectOpenAiOAuth = useCallback(() => connectOAuth("openai"), [connectOAuth]);
+  const connectGoogleOAuth = useCallback(() => connectOAuth("google"), [connectOAuth]);
 
   const disconnectAccount = useCallback(async (accountId: string) => {
     setIsMutating(true);
@@ -167,13 +190,15 @@ export function useAccountsSettings(): AccountsSettingsState {
           await listen("oauth_complete", (event) => {
             const payload = toOAuthCompleteEvent(event.payload);
 
-            if (!payload || payload.providerId !== "google" || !isActive) {
+            if (!payload || !oauthProviderIds.includes(payload.providerId) || !isActive) {
               return;
             }
+            const providerId = payload.providerId as OAuthProviderId;
 
-            setOAuthStatus("connected");
-            setOAuthMessage(
-              payload.label ? `Google account connected (${payload.label}).` : "Google account connected."
+            setOAuthState(
+              providerId,
+              "connected",
+              payload.label ? `${payload.label} connected.` : `${providerId} account connected.`
             );
             void reloadAccounts({ silent: true });
           })
@@ -183,12 +208,12 @@ export function useAccountsSettings(): AccountsSettingsState {
           await listen("oauth_error", (event) => {
             const payload = toOAuthErrorEvent(event.payload);
 
-            if (!payload || payload.providerId !== "google" || !isActive) {
+            if (!payload || !oauthProviderIds.includes(payload.providerId) || !isActive) {
               return;
             }
+            const providerId = payload.providerId as OAuthProviderId;
 
-            setOAuthStatus("error");
-            setOAuthMessage(payload.message ?? payload.errorCode ?? "Google OAuth failed.");
+            setOAuthState(providerId, "error", payload.message ?? payload.errorCode ?? "OAuth failed.");
           })
         );
 
@@ -200,9 +225,10 @@ export function useAccountsSettings(): AccountsSettingsState {
 
             try {
               const account = toAccountDto(event.payload);
-              if (account.providerId !== "google" || account.status !== "active") {
+              if (!oauthProviderIds.includes(account.providerId) || account.status !== "active") {
                 return;
               }
+              const providerId = account.providerId as OAuthProviderId;
 
               setAccounts((currentAccounts) => {
                 const withoutExisting = currentAccounts.filter((entry) => entry.id !== account.id);
@@ -215,8 +241,7 @@ export function useAccountsSettings(): AccountsSettingsState {
                   : withoutExisting;
                 return [...normalized, account];
               });
-              setOAuthStatus("connected");
-              setOAuthMessage(`Google account connected (${account.label}).`);
+              setOAuthState(providerId, "connected", `${account.label} connected.`);
             } catch {
               void reloadAccounts({ silent: true });
             }
@@ -232,8 +257,8 @@ export function useAccountsSettings(): AccountsSettingsState {
         );
       } catch (bindError) {
         setError(errorMessage(bindError));
-        setOAuthStatus("error");
-        setOAuthMessage("Could not subscribe to OAuth events.");
+        setOAuthState("openai", "error", "Could not subscribe to OAuth events.");
+        setOAuthState("google", "error", "Could not subscribe to OAuth events.");
       }
     }
 
@@ -243,7 +268,7 @@ export function useAccountsSettings(): AccountsSettingsState {
       isActive = false;
       cleanupFns.forEach((cleanup) => cleanup());
     };
-  }, [reloadAccounts]);
+  }, [reloadAccounts, setOAuthState]);
 
   return {
     accounts,
@@ -251,9 +276,10 @@ export function useAccountsSettings(): AccountsSettingsState {
     isLoading,
     isMutating,
     error,
-    oauthStatus,
-    oauthMessage,
+    oauthStatuses,
+    oauthMessages,
     createApiKeyAccount,
+    connectOpenAiOAuth,
     connectGoogleOAuth,
     disconnectAccount,
     reloadAccounts

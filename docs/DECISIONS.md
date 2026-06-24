@@ -270,3 +270,29 @@ Incremental persistence matches provider chunk delivery without replacing prior 
 
 Status:
 Accepted
+
+---
+
+### Phase 5A Workspace Architecture Validation
+
+Decision:
+Validate existing workspace isolation in schema and repositories without implementing `workspace_create`, `workspace_switch`, or multi-workspace UI
+
+Reason:
+Phase 5A scope is audit-only: confirm `workspace_id` scoping prevents cross-workspace pane/message leakage, accounts remain global, and per-workspace data survives restart before building management commands
+
+Status:
+Accepted — see [PHASE5A_VALIDATION.md](./PHASE5A_VALIDATION.md)
+
+---
+
+### Phase 5B OAuth & Pane Settings Validation
+
+Decision:
+Audit OpenAI OAuth readiness and pane-level model/reasoning persistence without implementing new commands, OAuth providers, or UI wiring
+
+Reason:
+Phase 5B scope is audit-only: confirm Google OAuth lifecycle is sound, document OpenAI API-key-only path, assess `panes.model_id` / `metadata_json` for per-pane settings, and verify workspace/account isolation before implementation
+
+Status:
+Accepted — see [PHASE5B_VALIDATION.md](./PHASE5B_VALIDATION.md)

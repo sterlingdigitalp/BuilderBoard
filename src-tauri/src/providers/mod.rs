@@ -1,6 +1,9 @@
 use std::io::{BufRead, BufReader};
+use std::sync::OnceLock;
 
-use reqwest::blocking::Client;
+use futures_util::StreamExt;
+use reqwest::blocking::Client as BlockingClient;
+use reqwest::Client as AsyncClient;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -30,11 +33,20 @@ pub enum Provider {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProviderRequest {
     pub conversation: Conversation,
+    pub reasoning_level: Option<String>,
 }
 
 impl ProviderRequest {
     pub fn new(conversation: Conversation) -> Self {
-        Self { conversation }
+        Self {
+            conversation,
+            reasoning_level: None,
+        }
+    }
+
+    pub fn with_reasoning_level(mut self, reasoning_level: Option<String>) -> Self {
+        self.reasoning_level = reasoning_level;
+        self
     }
 }
 
@@ -186,11 +198,23 @@ impl ResolvedProvider {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct AnthropicProvider;
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct OpenAIProvider {
-    api_key: Option<String>,
+    auth: Option<OpenAIAuth>,
     base_url: String,
-    client: Client,
+    /// Lazily initialized so async execution never creates/drops reqwest's blocking runtime
+    /// on a tokio worker thread (that drop panics).
+    blocking_client: OnceLock<BlockingClient>,
+    async_client: AsyncClient,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum OpenAIAuth {
+    ApiKey(String),
+    ChatGptOAuth {
+        access_token: String,
+        account_id: Option<String>,
+    },
 }
 
 impl Default for OpenAIProvider {
@@ -201,26 +225,55 @@ impl Default for OpenAIProvider {
 
 impl PartialEq for OpenAIProvider {
     fn eq(&self, other: &Self) -> bool {
-        self.api_key == other.api_key && self.base_url == other.base_url
+        self.auth == other.auth && self.base_url == other.base_url
     }
 }
 
 impl Eq for OpenAIProvider {}
 
+impl Clone for OpenAIProvider {
+    fn clone(&self) -> Self {
+        Self {
+            auth: self.auth.clone(),
+            base_url: self.base_url.clone(),
+            blocking_client: OnceLock::new(),
+            async_client: self.async_client.clone(),
+        }
+    }
+}
+
 impl OpenAIProvider {
     pub fn new() -> Self {
         Self {
-            api_key: None,
+            auth: None,
             base_url: "https://api.openai.com/v1".to_string(),
-            client: Client::new(),
+            blocking_client: OnceLock::new(),
+            async_client: AsyncClient::new(),
         }
     }
 
     pub fn with_api_key(api_key: impl Into<String>) -> Self {
         Self {
-            api_key: Some(api_key.into()),
+            auth: Some(OpenAIAuth::ApiKey(api_key.into())),
             base_url: "https://api.openai.com/v1".to_string(),
-            client: Client::new(),
+            blocking_client: OnceLock::new(),
+            async_client: AsyncClient::new(),
+        }
+    }
+
+    pub fn with_bearer_token(token: impl Into<String>) -> Self {
+        Self::with_api_key(token)
+    }
+
+    pub fn with_chatgpt_oauth_token(token: impl Into<String>, account_id: Option<String>) -> Self {
+        Self {
+            auth: Some(OpenAIAuth::ChatGptOAuth {
+                access_token: token.into(),
+                account_id,
+            }),
+            base_url: "https://chatgpt.com/backend-api/codex".to_string(),
+            blocking_client: OnceLock::new(),
+            async_client: AsyncClient::new(),
         }
     }
 
@@ -230,23 +283,65 @@ impl OpenAIProvider {
         base_url: impl Into<String>,
     ) -> Self {
         Self {
-            api_key: Some(api_key.into()),
+            auth: Some(OpenAIAuth::ApiKey(api_key.into())),
             base_url: base_url.into(),
-            client: Client::new(),
+            blocking_client: OnceLock::new(),
+            async_client: AsyncClient::new(),
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_chatgpt_base_url_for_test(
+        token: impl Into<String>,
+        account_id: Option<String>,
+        base_url: impl Into<String>,
+    ) -> Self {
+        Self {
+            auth: Some(OpenAIAuth::ChatGptOAuth {
+                access_token: token.into(),
+                account_id,
+            }),
+            base_url: base_url.into(),
+            blocking_client: OnceLock::new(),
+            async_client: AsyncClient::new(),
+        }
+    }
+
+    fn blocking_http_client(&self) -> &BlockingClient {
+        self.blocking_client.get_or_init(BlockingClient::new)
     }
 
     fn chat_completions_url(&self) -> String {
         format!("{}/chat/completions", self.base_url.trim_end_matches('/'))
     }
 
+    fn chatgpt_responses_url(&self) -> String {
+        format!("{}/responses", self.base_url.trim_end_matches('/'))
+    }
+
     fn api_key(&self) -> ProviderResult<&str> {
-        self.api_key
-            .as_deref()
-            .filter(|api_key| !api_key.trim().is_empty())
-            .ok_or(ProviderError::MissingCredentials {
+        match self.auth.as_ref() {
+            Some(OpenAIAuth::ApiKey(api_key)) if !api_key.trim().is_empty() => Ok(api_key),
+            _ => Err(ProviderError::MissingCredentials {
                 provider: Provider::OpenAI,
-            })
+            }),
+        }
+    }
+
+    fn chatgpt_auth(&self) -> ProviderResult<(&str, Option<&str>)> {
+        match self.auth.as_ref() {
+            Some(OpenAIAuth::ChatGptOAuth {
+                access_token,
+                account_id,
+            }) if !access_token.trim().is_empty() => Ok((access_token, account_id.as_deref())),
+            _ => Err(ProviderError::MissingCredentials {
+                provider: Provider::OpenAI,
+            }),
+        }
+    }
+
+    fn is_chatgpt_oauth(&self) -> bool {
+        matches!(self.auth, Some(OpenAIAuth::ChatGptOAuth { .. }))
     }
 
     fn request_body(request: ProviderRequest, stream: bool) -> serde_json::Value {
@@ -257,24 +352,105 @@ impl OpenAIProvider {
         })
     }
 
+    fn chatgpt_responses_body(request: ProviderRequest, stream: bool) -> serde_json::Value {
+        let mut instructions = Vec::new();
+        let mut input = Vec::new();
+        for message in &request.conversation.messages {
+            match message.role {
+                MessageRole::System => instructions.push(message.content.clone()),
+                MessageRole::User => input.push(json!({
+                    "role": "user",
+                    "content": [{ "type": "input_text", "text": message.content }],
+                })),
+                MessageRole::Assistant => input.push(json!({
+                    "role": "assistant",
+                    "content": [{ "type": "output_text", "text": message.content }],
+                })),
+            }
+        }
+
+        let mut body = json!({
+            "model": openai_model_name(&request.conversation.model),
+            "input": input,
+            "store": false,
+            "stream": stream,
+        });
+        if !instructions.is_empty() {
+            body["instructions"] = json!(instructions.join("\n"));
+        }
+        body
+    }
+
     fn send_request(
         &self,
         request: ProviderRequest,
         stream: bool,
     ) -> ProviderResult<reqwest::blocking::Response> {
-        let api_key = self.api_key()?;
-        let response = self
-            .client
-            .post(self.chat_completions_url())
-            .bearer_auth(api_key)
-            .header(reqwest::header::CONTENT_TYPE, "application/json")
-            .json(&Self::request_body(request, stream))
-            .send()
-            .map_err(|error| ProviderError::Http {
-                status: error.status().map(|status| status.as_u16()),
-                message: error.to_string(),
-            })?;
+        let model_id = openai_model_name(&request.conversation.model);
+        let request_builder = match self.auth.as_ref() {
+            Some(OpenAIAuth::ApiKey(_)) => {
+                let api_key = match self.api_key() {
+                    Ok(api_key) => api_key,
+                    Err(error) => {
+                        trace_openai_request_sent(false);
+                        trace_openai_response_status("not_sent");
+                        return Err(error);
+                    }
+                };
+                let endpoint = self.chat_completions_url();
+                trace_provider_adapter("api_key", &endpoint, &model_id);
+                self.blocking_http_client()
+                    .post(endpoint)
+                    .bearer_auth(api_key)
+                    .header(reqwest::header::CONTENT_TYPE, "application/json")
+                    .json(&Self::request_body(request, stream))
+            }
+            Some(OpenAIAuth::ChatGptOAuth { .. }) => {
+                let (access_token, account_id) = match self.chatgpt_auth() {
+                    Ok(auth) => auth,
+                    Err(error) => {
+                        trace_openai_request_sent(false);
+                        trace_openai_response_status("not_sent");
+                        return Err(error);
+                    }
+                };
+                let endpoint = self.chatgpt_responses_url();
+                trace_provider_adapter("oauth", &endpoint, &model_id);
+                let mut builder = self
+                    .blocking_http_client()
+                    .post(endpoint)
+                    .bearer_auth(access_token)
+                    .header(reqwest::header::CONTENT_TYPE, "application/json")
+                    .header("originator", "opencode")
+                    .json(&Self::chatgpt_responses_body(request, stream));
+                if let Some(account_id) = account_id {
+                    builder = builder.header("ChatGPT-Account-Id", account_id);
+                }
+                builder
+            }
+            None => {
+                trace_openai_request_sent(false);
+                trace_openai_response_status("not_sent");
+                return Err(ProviderError::MissingCredentials {
+                    provider: Provider::OpenAI,
+                });
+            }
+        };
 
+        trace_openai_request_sent(true);
+        let response = request_builder.send().map_err(|error| {
+            let status = error.status().map(|status| status.as_u16());
+            match status {
+                Some(status) => trace_openai_response_status(status),
+                None => trace_openai_response_status("send_failed"),
+            }
+            ProviderError::Http {
+                status,
+                message: error.to_string(),
+            }
+        })?;
+
+        trace_openai_response_status(response.status().as_u16());
         if !response.status().is_success() {
             let status = response.status().as_u16();
             let message = response.text().unwrap_or_else(|error| error.to_string());
@@ -285,6 +461,201 @@ impl OpenAIProvider {
         }
 
         Ok(response)
+    }
+
+    async fn send_request_async(
+        &self,
+        request: ProviderRequest,
+        stream: bool,
+    ) -> ProviderResult<reqwest::Response> {
+        let model_id = openai_model_name(&request.conversation.model);
+        let request_builder = match self.auth.as_ref() {
+            Some(OpenAIAuth::ApiKey(_)) => {
+                let api_key = self.api_key()?;
+                let endpoint = self.chat_completions_url();
+                trace_provider_adapter("api_key", &endpoint, &model_id);
+                self.async_client
+                    .post(endpoint)
+                    .bearer_auth(api_key)
+                    .header(reqwest::header::CONTENT_TYPE, "application/json")
+                    .json(&Self::request_body(request, stream))
+            }
+            Some(OpenAIAuth::ChatGptOAuth { .. }) => {
+                let (access_token, account_id) = self.chatgpt_auth()?;
+                let endpoint = self.chatgpt_responses_url();
+                trace_provider_adapter("oauth", &endpoint, &model_id);
+                let mut builder = self
+                    .async_client
+                    .post(endpoint)
+                    .bearer_auth(access_token)
+                    .header(reqwest::header::CONTENT_TYPE, "application/json")
+                    .header("originator", "opencode")
+                    .json(&Self::chatgpt_responses_body(request, stream));
+                if let Some(account_id) = account_id {
+                    builder = builder.header("ChatGPT-Account-Id", account_id);
+                }
+                builder
+            }
+            None => {
+                return Err(ProviderError::MissingCredentials {
+                    provider: Provider::OpenAI,
+                });
+            }
+        };
+
+        trace_openai_request_sent(true);
+        let response = request_builder.send().await.map_err(|error| {
+            let status = error.status().map(|status| status.as_u16());
+            ProviderError::Http {
+                status,
+                message: error.to_string(),
+            }
+        })?;
+
+        trace_openai_response_status(response.status().as_u16());
+        if !response.status().is_success() {
+            let status = response.status().as_u16();
+            let message = response.text().await.unwrap_or_else(|error| error.to_string());
+            return Err(ProviderError::Http {
+                status: Some(status),
+                message,
+            });
+        }
+
+        Ok(response)
+    }
+
+    pub async fn stream_chunks_async<F>(
+        &self,
+        request: ProviderRequest,
+        mut on_chunk: F,
+    ) -> ProviderResult<()>
+    where
+        F: FnMut(ProviderResult<StreamChunk>) -> ProviderResult<()>,
+    {
+        let response = self.send_request_async(request, true).await?;
+        let is_oauth = self.is_chatgpt_oauth();
+        let mut byte_stream = response.bytes_stream();
+        let mut pending = String::new();
+
+        while let Some(next_bytes) = byte_stream.next().await {
+            let bytes = next_bytes.map_err(|error| ProviderError::Http {
+                status: None,
+                message: error.to_string(),
+            })?;
+            pending.push_str(&String::from_utf8_lossy(&bytes));
+
+            while let Some(line) = take_sse_line(&mut pending) {
+                if let Some(chunk) = parse_sse_line(line.as_str(), is_oauth) {
+                    on_chunk(chunk)?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
+fn take_sse_line(buffer: &mut String) -> Option<String> {
+    let newline_index = buffer.find('\n')?;
+    let mut line = buffer[..newline_index].trim().to_string();
+    let rest = buffer[newline_index + 1..].to_string();
+    *buffer = rest;
+    if line.ends_with('\r') {
+        line.pop();
+    }
+    if line.is_empty() {
+        return take_sse_line(buffer);
+    }
+    Some(line)
+}
+
+fn parse_sse_line(line: &str, is_oauth: bool) -> Option<ProviderResult<StreamChunk>> {
+    let line = line.trim();
+    if line.is_empty() || line.starts_with(':') || line.starts_with("event: ") {
+        return None;
+    }
+    let data = line.strip_prefix("data: ")?;
+    if data == "[DONE]" {
+        return Some(Ok(StreamChunk {
+            content_delta: String::new(),
+            is_complete: true,
+        }));
+    }
+
+    if is_oauth {
+        let event = serde_json::from_str::<serde_json::Value>(data).ok()?;
+        match event.get("type").and_then(|value| value.as_str()) {
+            Some("response.output_text.delta") => {
+                let content_delta = event
+                    .get("delta")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or_default()
+                    .to_string();
+                if content_delta.is_empty() {
+                    None
+                } else {
+                    Some(Ok(StreamChunk {
+                        content_delta,
+                        is_complete: false,
+                    }))
+                }
+            }
+            Some("response.completed") => Some(Ok(StreamChunk {
+                content_delta: String::new(),
+                is_complete: true,
+            })),
+            Some("error") => Some(Err(ProviderError::InvalidResponse {
+                message: event.to_string(),
+            })),
+            _ => None,
+        }
+    } else {
+        let event = serde_json::from_str::<serde_json::Value>(data).ok()?;
+        let choice = event.get("choices")?.as_array()?.first()?;
+        if choice.get("finish_reason").and_then(|value| value.as_str()).is_some() {
+            return Some(Ok(StreamChunk {
+                content_delta: String::new(),
+                is_complete: true,
+            }));
+        }
+        let content_delta = choice
+            .get("delta")
+            .and_then(|delta| delta.get("content"))
+            .and_then(|content| content.as_str())
+            .unwrap_or_default()
+            .to_string();
+        if content_delta.is_empty() {
+            None
+        } else {
+            Some(Ok(StreamChunk {
+                content_delta,
+                is_complete: false,
+            }))
+        }
+    }
+}
+
+fn trace_provider_adapter(auth_type: &str, endpoint: &str, model_id: &str) {
+    if std::env::var("BUILDERBOARD_TRACE_OPENAI_EXECUTION").as_deref() != Ok("1") {
+        return;
+    }
+
+    println!("MODEL_ID={model_id}");
+    println!("ENDPOINT={endpoint}");
+    println!("TRACE CredentialService -> Provider Adapter auth_type={auth_type}");
+    println!("TRACE Provider Adapter -> OpenAIProvider endpoint={endpoint} model_id={model_id}");
+}
+
+fn trace_openai_request_sent(sent: bool) {
+    if std::env::var("BUILDERBOARD_TRACE_OPENAI_EXECUTION").as_deref() == Ok("1") {
+        println!("OPENAI_REQUEST_SENT={sent}");
+    }
+}
+
+fn trace_openai_response_status(status: impl std::fmt::Display) {
+    if std::env::var("BUILDERBOARD_TRACE_OPENAI_EXECUTION").as_deref() == Ok("1") {
+        println!("OPENAI_RESPONSE_STATUS={status}");
     }
 }
 
@@ -308,6 +679,25 @@ impl LLMProvider for AnthropicProvider {
 impl LLMProvider for OpenAIProvider {
     fn send(&self, request: ProviderRequest) -> ProviderResult<ProviderResponse> {
         let model = request.conversation.model.clone();
+        if self.is_chatgpt_oauth() {
+            let response = self.send_request(request, false)?;
+            let body: serde_json::Value =
+                response
+                    .json()
+                    .map_err(|error| ProviderError::InvalidResponse {
+                        message: error.to_string(),
+                    })?;
+            let content =
+                extract_responses_text(&body).ok_or_else(|| ProviderError::InvalidResponse {
+                    message: "ChatGPT response did not include assistant content".to_string(),
+                })?;
+
+            return Ok(ProviderResponse {
+                message: Message::new(MessageRole::Assistant, content),
+                model,
+            });
+        }
+
         let response = self.send_request(request, false)?;
         let body: OpenAIChatCompletionResponse =
             response
@@ -332,7 +722,11 @@ impl LLMProvider for OpenAIProvider {
 
     fn stream(&self, request: ProviderRequest) -> ProviderResult<ProviderStream> {
         let response = self.send_request(request, true)?;
-        Ok(Box::new(OpenAIStream::new(response)))
+        if self.is_chatgpt_oauth() {
+            Ok(Box::new(OpenAIResponsesStream::new(response)))
+        } else {
+            Ok(Box::new(OpenAIStream::new(response)))
+        }
     }
 
     fn list_models(&self) -> ProviderResult<Vec<Model>> {
@@ -401,6 +795,32 @@ pub fn resolve_openai_provider_with_api_key(
     ))
 }
 
+pub fn resolve_openai_provider_with_bearer_token(
+    provider: &ProviderDto,
+    credential: &CredentialHandle,
+    token: String,
+    account_id: Option<String>,
+) -> Result<ResolvedProvider, ProviderResolutionError> {
+    if provider.provider_type != "openai" {
+        return Err(ProviderResolutionError::unsupported_provider(
+            provider.id.clone(),
+            provider.provider_type.clone(),
+        ));
+    }
+
+    if credential.auth_type != "api_key" && credential.auth_type != "oauth" {
+        return Err(ProviderResolutionError::storage(format!(
+            "OpenAI execution requires api_key or oauth auth, got {}",
+            credential.auth_type
+        )));
+    }
+
+    Ok(ResolvedProvider::new(
+        Box::new(OpenAIProvider::with_chatgpt_oauth_token(token, account_id)),
+        credential.clone(),
+    ))
+}
+
 #[derive(Debug, Deserialize)]
 struct OpenAIChatCompletionResponse {
     choices: Vec<OpenAIChoice>,
@@ -437,7 +857,21 @@ struct OpenAIStream {
     done: bool,
 }
 
+struct OpenAIResponsesStream {
+    lines: std::io::Lines<BufReader<reqwest::blocking::Response>>,
+    done: bool,
+}
+
 impl OpenAIStream {
+    fn new(response: reqwest::blocking::Response) -> Self {
+        Self {
+            lines: BufReader::new(response).lines(),
+            done: false,
+        }
+    }
+}
+
+impl OpenAIResponsesStream {
     fn new(response: reqwest::blocking::Response) -> Self {
         Self {
             lines: BufReader::new(response).lines(),
@@ -509,6 +943,103 @@ impl Iterator for OpenAIStream {
 
         self.done = true;
         None
+    }
+}
+
+impl Iterator for OpenAIResponsesStream {
+    type Item = ProviderResult<StreamChunk>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.done {
+            return None;
+        }
+
+        for line in self.lines.by_ref() {
+            let line = match line {
+                Ok(line) => line,
+                Err(error) => {
+                    self.done = true;
+                    return Some(Err(ProviderError::Http {
+                        status: None,
+                        message: error.to_string(),
+                    }));
+                }
+            };
+            let line = line.trim();
+            if line.is_empty() || line.starts_with(':') || line.starts_with("event: ") {
+                continue;
+            }
+            let Some(data) = line.strip_prefix("data: ") else {
+                continue;
+            };
+            if data == "[DONE]" {
+                self.done = true;
+                return Some(Ok(StreamChunk {
+                    content_delta: String::new(),
+                    is_complete: true,
+                }));
+            }
+
+            let event = match serde_json::from_str::<serde_json::Value>(data) {
+                Ok(event) => event,
+                Err(error) => {
+                    self.done = true;
+                    return Some(Err(ProviderError::InvalidResponse {
+                        message: error.to_string(),
+                    }));
+                }
+            };
+
+            match event.get("type").and_then(|value| value.as_str()) {
+                Some("response.output_text.delta") => {
+                    let content_delta = event
+                        .get("delta")
+                        .and_then(|value| value.as_str())
+                        .unwrap_or_default()
+                        .to_string();
+                    if !content_delta.is_empty() {
+                        return Some(Ok(StreamChunk {
+                            content_delta,
+                            is_complete: false,
+                        }));
+                    }
+                }
+                Some("response.completed") => {
+                    self.done = true;
+                    return Some(Ok(StreamChunk {
+                        content_delta: String::new(),
+                        is_complete: true,
+                    }));
+                }
+                Some("error") => {
+                    self.done = true;
+                    return Some(Err(ProviderError::InvalidResponse {
+                        message: event.to_string(),
+                    }));
+                }
+                _ => {}
+            }
+        }
+
+        self.done = true;
+        None
+    }
+}
+
+fn extract_responses_text(body: &serde_json::Value) -> Option<String> {
+    let mut pieces = Vec::new();
+    for item in body.get("output")?.as_array()? {
+        for content in item.get("content").and_then(|value| value.as_array())? {
+            if let Some(text) = content.get("text").and_then(|value| value.as_str()) {
+                pieces.push(text.to_string());
+            }
+        }
+    }
+
+    if pieces.is_empty() {
+        None
+    } else {
+        Some(pieces.join(""))
     }
 }
 
@@ -607,6 +1138,28 @@ mod tests {
     }
 
     #[test]
+    fn openai_send_uses_selected_custom_model() {
+        for model_id in ["gpt-5.5", "gpt-5.4-mini", "gpt-5.3-codex-spark"] {
+            let (base_url, request_rx) = spawn_openai_server(
+                "HTTP/1.1 200 OK",
+                "application/json",
+                r#"{"choices":[{"message":{"content":"Hello from selected model"}}]}"#,
+            );
+            let provider = OpenAIProvider::with_base_url_for_test("sk-test", base_url);
+            let conversation =
+                Conversation::new("conversation-1", Model::Custom(model_id.to_string()))
+                    .with_message(Message::new(MessageRole::User, "Hello"));
+
+            provider
+                .send(ProviderRequest::new(conversation))
+                .expect("OpenAI send should parse selected model response");
+
+            let request = request_rx.recv().expect("server should capture request");
+            assert!(request.contains(&format!(r#""model":"{model_id}""#)));
+        }
+    }
+
+    #[test]
     fn openai_stream_parses_sse_chunks() {
         let body = concat!(
             "data: {\"choices\":[{\"delta\":{\"content\":\"Hel\"},\"finish_reason\":null}]}\n\n",
@@ -627,6 +1180,47 @@ mod tests {
         assert_eq!(chunks[1].content_delta, "lo");
         assert!(chunks[2].is_complete);
         let request = request_rx.recv().expect("server should capture request");
+        assert!(request.contains(r#""stream":true"#));
+    }
+
+    #[test]
+    fn openai_chatgpt_oauth_posts_responses_request() {
+        let body = concat!(
+            "event: response.output_text.delta\n",
+            "data: {\"type\":\"response.output_text.delta\",\"delta\":\"Hel\"}\n\n",
+            "event: response.output_text.delta\n",
+            "data: {\"type\":\"response.output_text.delta\",\"delta\":\"lo\"}\n\n",
+            "event: response.completed\n",
+            "data: {\"type\":\"response.completed\",\"response\":{}}\n\n",
+        );
+        let (base_url, request_rx) =
+            spawn_openai_server("HTTP/1.1 200 OK", "text/event-stream", body);
+        let provider = OpenAIProvider::with_chatgpt_base_url_for_test(
+            "oauth-access-token",
+            Some("acc-openai".to_string()),
+            base_url,
+        );
+
+        let chunks = provider
+            .stream(ProviderRequest::new(openai_hello_conversation()))
+            .expect("ChatGPT OAuth stream should start")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("ChatGPT OAuth stream should parse chunks");
+
+        assert_eq!(chunks[0].content_delta, "Hel");
+        assert_eq!(chunks[1].content_delta, "lo");
+        assert!(chunks[2].is_complete);
+
+        let request = request_rx.recv().expect("server should capture request");
+        let lower_request = request.to_ascii_lowercase();
+        assert!(request.starts_with("POST /responses HTTP/1.1"));
+        assert!(lower_request.contains("authorization: bearer oauth-access-token"));
+        assert!(lower_request.contains("chatgpt-account-id: acc-openai"));
+        assert!(request.contains("originator: opencode"));
+        assert!(request.contains(r#""text":"Hello""#));
+        assert!(request.contains(r#""type":"input_text""#));
+        assert!(request.contains(r#""role":"user""#));
+        assert!(request.contains(r#""store":false"#));
         assert!(request.contains(r#""stream":true"#));
     }
 
@@ -779,5 +1373,13 @@ mod tests {
         });
 
         (format!("http://{address}"), request_rx)
+    }
+
+    #[test]
+    fn openai_provider_async_only_drop_does_not_panic_on_tokio_worker() {
+        tauri::async_runtime::block_on(async {
+            let provider = OpenAIProvider::with_chatgpt_oauth_token("oauth-token", None);
+            drop(provider);
+        });
     }
 }

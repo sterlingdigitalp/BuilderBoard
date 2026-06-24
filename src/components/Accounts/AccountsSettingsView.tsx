@@ -8,9 +8,10 @@ export function AccountsSettingsView() {
     isLoading,
     isMutating,
     error,
-    oauthMessage,
-    oauthStatus,
+    oauthMessages,
+    oauthStatuses,
     createApiKeyAccount,
+    connectOpenAiOAuth,
     connectGoogleOAuth,
     disconnectAccount
   } = useAccountsSettings();
@@ -38,10 +39,10 @@ export function AccountsSettingsView() {
           accounts={accounts}
           provider={provider}
           isMutating={isMutating}
-          oauthMessage={provider.id === "google" ? oauthMessage : null}
-          oauthStatus={provider.id === "google" ? oauthStatus : "idle"}
+          oauthMessage={provider.id === "openai" || provider.id === "google" ? oauthMessages[provider.id] : null}
+          oauthStatus={provider.id === "openai" || provider.id === "google" ? oauthStatuses[provider.id] : "idle"}
           onCreate={createApiKeyAccount}
-          onConnectOAuth={connectGoogleOAuth}
+          onConnectOAuth={provider.id === "openai" ? connectOpenAiOAuth : connectGoogleOAuth}
           onDisconnect={disconnectAccount}
         />
       ))}

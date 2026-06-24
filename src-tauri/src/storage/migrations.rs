@@ -22,6 +22,38 @@ const MIGRATION_0004: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../migrations/0004_google_oauth_scopes_fix.sql"
 ));
+const MIGRATION_0005: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../migrations/0005_active_workspace.sql"
+));
+const MIGRATION_0006: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../migrations/0006_openai_oauth_config.sql"
+));
+const MIGRATION_0007: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../migrations/0007_openai_oauth_discovery_fix.sql"
+));
+const MIGRATION_0008: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../migrations/0008_openai_chatgpt_login.sql"
+));
+const MIGRATION_0009: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../migrations/0009_pane_project_context.sql"
+));
+const MIGRATION_0010: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../migrations/0010_pane_project_id.sql"
+));
+const MIGRATION_0011: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../migrations/0011_pane_project_backfill.sql"
+));
+const MIGRATION_0012: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../migrations/0012_pane_project_enforce.sql"
+));
 
 #[cfg(test)]
 pub(crate) const MIGRATION_0001_FOR_TEST: &str = MIGRATION_0001;
@@ -45,6 +77,46 @@ pub(crate) const MIGRATIONS_FOR_TEST: &str = concat!(
     include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../migrations/0004_google_oauth_scopes_fix.sql"
+    )),
+    "\n",
+    include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../migrations/0005_active_workspace.sql"
+    )),
+    "\n",
+    include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../migrations/0006_openai_oauth_config.sql"
+    )),
+    "\n",
+    include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../migrations/0007_openai_oauth_discovery_fix.sql"
+    )),
+    "\n",
+    include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../migrations/0008_openai_chatgpt_login.sql"
+    )),
+    "\n",
+    include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../migrations/0009_pane_project_context.sql"
+    )),
+    "\n",
+    include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../migrations/0010_pane_project_id.sql"
+    )),
+    "\n",
+    include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../migrations/0011_pane_project_backfill.sql"
+    )),
+    "\n",
+    include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../migrations/0012_pane_project_enforce.sql"
     )),
 );
 
@@ -82,6 +154,38 @@ impl MigrationRunner {
                 Migration {
                     version: "0004_google_oauth_scopes_fix",
                     sql: MIGRATION_0004,
+                },
+                Migration {
+                    version: "0005_active_workspace",
+                    sql: MIGRATION_0005,
+                },
+                Migration {
+                    version: "0006_openai_oauth_config",
+                    sql: MIGRATION_0006,
+                },
+                Migration {
+                    version: "0007_openai_oauth_discovery_fix",
+                    sql: MIGRATION_0007,
+                },
+                Migration {
+                    version: "0008_openai_chatgpt_login",
+                    sql: MIGRATION_0008,
+                },
+                Migration {
+                    version: "0009_pane_project_context",
+                    sql: MIGRATION_0009,
+                },
+                Migration {
+                    version: "0010_pane_project_id",
+                    sql: MIGRATION_0010,
+                },
+                Migration {
+                    version: "0011_pane_project_backfill",
+                    sql: MIGRATION_0011,
+                },
+                Migration {
+                    version: "0012_pane_project_enforce",
+                    sql: MIGRATION_0012,
                 },
             ],
         }

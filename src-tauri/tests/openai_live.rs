@@ -31,6 +31,7 @@ fn live_openai_streaming_execution_persists_response() -> StorageResult<()> {
             connection,
             CreatePaneRequest {
                 workspace_id: None,
+                project_id: None,
                 title: Some("Phase 4B OpenAI live validation".to_string()),
                 sort_order: None,
             },

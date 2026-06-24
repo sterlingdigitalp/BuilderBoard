@@ -171,4 +171,21 @@ mod tests {
             .any(|scope| scope.contains("generative-language")));
         Ok(())
     }
+
+    #[test]
+    fn openai_oauth_config_is_seeded() -> StorageResult<()> {
+        let conn = rusqlite::Connection::open_in_memory()?;
+        conn.execute_batch(crate::storage::migrations::MIGRATIONS_FOR_TEST)?;
+
+        let config = ProviderRepository::get_oauth_config(&conn, "openai")?;
+        assert_eq!(
+            config.authorization_url,
+            "https://auth.openai.com/oauth/authorize"
+        );
+        assert_eq!(config.token_url, "https://auth.openai.com/oauth/token");
+        assert_eq!(config.userinfo_url, "");
+        assert!(config.scopes.iter().any(|scope| scope == "offline_access"));
+        assert!(!config.scopes.iter().any(|scope| scope == "api"));
+        Ok(())
+    }
 }

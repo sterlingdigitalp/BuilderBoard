@@ -9,33 +9,33 @@ interface MessageListProps {
 const listStyle: CSSProperties = {
   display: "grid",
   alignContent: "start",
-  gap: 10,
+  gap: 5,
   minHeight: 0,
   overflow: "auto",
-  padding: 10
+  padding: 5
 };
 
 const emptyStyle: CSSProperties = {
   display: "grid",
   placeItems: "center",
-  minHeight: 120,
+  minHeight: 72,
   color: "var(--button-fg)",
-  fontSize: "0.82rem",
+  fontSize: "0.78rem",
   opacity: 0.72,
   textAlign: "center"
 };
 
 const messageStyle: CSSProperties = {
   display: "grid",
-  gap: 5,
-  maxWidth: "92%",
-  padding: "8px 10px",
+  gap: 3,
+  maxWidth: "96%",
+  padding: "5px 7px",
   border: "1px solid var(--pane-border)",
-  borderRadius: 8,
+  borderRadius: 6,
   background: "var(--button-bg)",
   color: "var(--text-strong)",
-  fontSize: "0.82rem",
-  lineHeight: 1.45,
+  fontSize: "0.8rem",
+  lineHeight: 1.34,
   whiteSpace: "pre-wrap",
   overflowWrap: "anywhere"
 };
@@ -50,8 +50,8 @@ const metaStyle: CSSProperties = {
   display: "flex",
   alignItems: "center",
   justifyContent: "space-between",
-  gap: 8,
-  fontSize: "0.66rem",
+  gap: 5,
+  fontSize: "0.6rem",
   fontWeight: 700,
   opacity: 0.7,
   textTransform: "uppercase"

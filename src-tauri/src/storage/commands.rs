@@ -4,6 +4,7 @@ use tauri::{AppHandle, Emitter, Runtime, State};
 
 use crate::auth::{CredentialService, OAuthService};
 use crate::chat::{PaneExecutionContext, ProviderResolutionService};
+use crate::execution::global_engine_registry;
 use crate::filesystem_intent::{FilesystemToolCall, route_filesystem_tools};
 use crate::project_scope_cache::ProjectScopeCache;
 use crate::stream_execution::{run_background_stream_chat, StreamChatJob};
@@ -281,7 +282,9 @@ pub async fn stream_chat(
     assistant_message_id: String,
     reasoning_level: Option<String>,
 ) -> Result<(), String> {
-    if provider_id != "openai" {
+    // Engine selection replaces hardcoded OpenAI check. Only engines that are
+    // registered (currently only openai) are allowed. Behavior is identical.
+    if global_engine_registry().get(&provider_id).is_none() {
         let message = "Only OpenAI execution is supported in Phase 4B.".to_string();
         emit_stream_error(
             &app,

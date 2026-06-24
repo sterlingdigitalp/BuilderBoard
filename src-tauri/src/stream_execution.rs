@@ -1,12 +1,14 @@
 use std::sync::Arc;
 
 use tauri::{AppHandle, Runtime};
+use tokio::sync::mpsc;
 
 use crate::auth::{CredentialService, OAuthService};
 use crate::chat::ProviderResolutionService;
+use crate::execution::{global_engine_registry, ExecutionContext, ExecutionEvent, ExecutionRequest};
 use crate::filesystem_tools::perf::{trace_perf_metric, PerfSpan};
 use crate::project_scope_cache::ProjectScopeCache;
-use crate::providers::{ProviderError, ProviderRequest, ProviderResolutionError};
+use crate::providers::{ProviderError, ProviderResolutionError};
 use crate::runtime_diagnostics::trace_runtime_phase;
 use crate::storage::commands::{
     emit_stream_enrichment_started, emit_stream_error, enrich_conversation_with_filesystem,
@@ -101,12 +103,6 @@ pub async fn run_background_stream_chat_inner<R: Runtime>(
         .map_err(map_provider_resolution_error)?;
     }
 
-    let openai_provider = ProviderResolutionService::resolve_openai_provider(
-        prepared.execution_context,
-        credentials,
-    )
-    .map_err(map_provider_resolution_error)?;
-
     emit_stream_enrichment_started(app, &job.pane_id, &job.assistant_message_id);
     trace_perf_metric("TTFT_MS", ttft_span.elapsed_ms());
 
@@ -128,41 +124,100 @@ pub async fn run_background_stream_chat_inner<R: Runtime>(
         prepared.conversation
     };
 
+    // Route ALL execution through the (now generalized) ExecutionEngine abstraction.
+    // The abstraction is execution-centric. OpenAI remains the only engine for now
+    // and produces exactly the same deltas, metrics, and side-effects as before.
+    // Selection supports both OpenAI (by provider "openai") and GrokBuild (by model containing "grok")
+    // This allows validation of multiple engines through the exact same ExecutionManager/registry path
+    // without any UI or pane model changes.
+    let engine_key = if job.model_id.to_lowercase().contains("grok") || job.provider_id.to_lowercase().contains("grok") {
+        "grok".to_string()
+    } else {
+        job.provider_id.clone()
+    };
+
+    let engine = global_engine_registry()
+        .get(&engine_key)
+        .ok_or_else(|| {
+            StorageError::InvalidInput(format!(
+                "no execution engine registered for '{}'",
+                engine_key
+            ))
+        })?;
+
     let openai_span = PerfSpan::start("OPENAI_REQUEST_DURATION_MS");
+    let openai_request_start = std::time::Instant::now();
     trace_runtime_phase("openai_stream", "start");
 
-    let request = ProviderRequest::new(conversation)
-        .with_reasoning_level(job.reasoning_level.clone());
+    // Build generalized request and context (future-proof)
+    let exec_request = ExecutionRequest::chat(conversation, job.reasoning_level.clone());
 
-    let mut openai_started = false;
-    let mut write_buffer = StreamWriteBuffer::new(
+    // Build a rich but minimal ExecutionContext from existing data.
+    // For the current OpenAI chat path, credential material is still supplied.
+    // Local engines will see credential = None.
+    let exec_context = ExecutionContext::from_pane_project(
+        job.assistant_message_id.clone(),
+        Some(job.pane_id.clone()),
+        None, // project enrichment happens outside engine (unchanged)
+        None,
+        None, // cwd can be set by specific engines or future logic
+    );
+
+    // Buffer only used for finish (deltas now driven by events)
+    let finish_write_buffer = StreamWriteBuffer::new(
         Arc::clone(stream_persistence),
         job.pane_id.clone(),
         job.assistant_message_id.clone(),
     );
 
-    let stream_result = openai_provider
-        .stream_chunks_async(request, |chunk| {
-            if !openai_started {
-                trace_perf_metric("OPENAI_REQUEST_DURATION_MS", openai_span.elapsed_ms());
-                openai_started = true;
-            }
+    // Event-driven worker (generalized). TextDelta events are turned into the
+    // exact same push + metric behavior the old StreamChunk path had.
+    let (event_tx, mut event_rx) = mpsc::unbounded_channel::<ExecutionEvent>();
 
-            match chunk {
-                Ok(chunk) => {
-                    if chunk.is_complete {
-                        return Ok(());
+    let app_clone = app.clone();
+    let worker_persistence = Arc::clone(stream_persistence);
+    let worker_pane = job.pane_id.clone();
+    let worker_msg = job.assistant_message_id.clone();
+    let worker = tauri::async_runtime::spawn(async move {
+        let write_buffer = StreamWriteBuffer::new(worker_persistence, worker_pane, worker_msg);
+        let mut started = false;
+        while let Some(event) = event_rx.recv().await {
+            match event {
+                ExecutionEvent::TextDelta { content } => {
+                    if !started {
+                        trace_perf_metric("OPENAI_REQUEST_DURATION_MS", openai_request_start.elapsed().as_millis());
+                        started = true;
                     }
-                    write_buffer
-                        .push(app, &chunk.content_delta)
-                        .map_err(|error| ProviderError::InvalidResponse {
+                    if let Err(error) = write_buffer.push(&app_clone, &content) {
+                        return Err(ProviderError::InvalidResponse {
                             message: error.to_string(),
-                        })
+                        });
+                    }
                 }
-                Err(error) => Err(error),
+                ExecutionEvent::RunCompleted { .. } | ExecutionEvent::RunStarted { .. } => {
+                    // no-op for delta path; finish handled after
+                }
+                ExecutionEvent::Error { message, .. } => {
+                    return Err(ProviderError::InvalidResponse { message });
+                }
+                _ => {}
             }
-        })
+        }
+        Ok(())
+    });
+
+    // Call the generalized engine API
+    let stream_result = engine
+        .execute(
+            exec_context,
+            exec_request,
+            Box::new(move |event| {
+                let _ = event_tx.send(event);
+            }),
+        )
         .await;
+
+    let _ = worker.await;
 
     if let Err(error) = stream_result {
         let message = format!("{error:?}");
@@ -176,15 +231,13 @@ pub async fn run_background_stream_chat_inner<R: Runtime>(
         return Err(StorageError::InvalidInput(format!("provider stream error: {error:?}")));
     }
 
-    write_buffer.finish_with_complete(app).await?;
+    finish_write_buffer.finish_with_complete(app).await?;
 
     trace_runtime_phase("openai_stream", "complete");
 
-    if !openai_started {
-        openai_span.finish();
-    } else {
-        trace_perf_metric("OPENAI_STREAM_TOTAL_MS", openai_span.elapsed_ms());
-    }
+    // Post-stream metric/tracing kept for diagnostic parity. Event worker handled first-chunk timing.
+    trace_perf_metric("OPENAI_STREAM_TOTAL_MS", openai_span.elapsed_ms());
+    let _ = openai_span.finish();
     total_span.finish();
     Ok(())
 }

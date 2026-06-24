@@ -26,7 +26,7 @@ impl StreamWriteBuffer {
     }
 
     pub fn push<R: Runtime>(
-        &mut self,
+        &self,
         app: &AppHandle<R>,
         delta: &str,
     ) -> Result<(), StorageError> {

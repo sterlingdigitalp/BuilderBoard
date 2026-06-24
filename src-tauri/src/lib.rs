@@ -1,5 +1,6 @@
 pub mod auth;
 pub mod chat;
+pub mod execution;
 pub mod filesystem_intent;
 pub mod filesystem_tools;
 pub mod runtime_diagnostics;

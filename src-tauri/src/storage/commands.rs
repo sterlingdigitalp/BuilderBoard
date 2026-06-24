@@ -4,7 +4,8 @@ use tauri::{AppHandle, Emitter, Runtime, State};
 
 use crate::auth::{CredentialService, OAuthService};
 use crate::chat::{PaneExecutionContext, ProviderResolutionService};
-use crate::execution::global_engine_registry;
+use crate::builders::global_builder_registry;
+use crate::execution::{global_engine_registry, ExecutionManager, ExecutionClass};
 use crate::filesystem_intent::{FilesystemToolCall, route_filesystem_tools};
 use crate::project_scope_cache::ProjectScopeCache;
 use crate::stream_execution::{run_background_stream_chat, StreamChatJob};
@@ -43,6 +44,86 @@ pub fn provider_list_from_database(database: &Database) -> Result<Vec<ProviderDt
     database
         .with_connection(ProviderRepository::list_enabled)
         .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn engine_list() -> Vec<serde_json::Value> {
+    let reg = global_engine_registry();
+    reg.list_ids()
+        .into_iter()
+        .filter_map(|id| {
+            reg.get(&id).map(|engine| {
+                let caps = engine.capabilities();
+                serde_json::json!({
+                    "id": id,
+                    "displayName": engine.display_name(),
+                    "models": engine.list_models(),
+                    "supportedEfforts": engine.supported_effort_levels(),
+                    "health": engine.health(),
+                    "capabilities": {
+                        "locality": format!("{:?}", caps.locality),
+                        "features": {
+                            "chat": caps.features.chat,
+                            "streaming": caps.features.streaming,
+                            "reasoning": caps.features.reasoning,
+                            "toolUse": caps.features.tool_use,
+                            "images": caps.features.images,
+                            "embeddings": caps.features.embeddings,
+                            "structuredOutput": caps.features.structured_output,
+                            "multimodal": caps.features.multimodal,
+                            "filesystem": caps.features.filesystem,
+                            "shell": caps.features.shell,
+                            "subagents": caps.features.subagents,
+                            "worktrees": caps.features.worktrees,
+                            "cancellation": caps.features.cancellation,
+                        }
+                    }
+                })
+            })
+        })
+        .collect()
+}
+
+#[tauri::command]
+pub fn builder_list() -> Vec<serde_json::Value> {
+    let reg = global_builder_registry();
+    reg.list()
+        .into_iter()
+        .map(|b| {
+            serde_json::json!({
+                "name": b.name,
+                "displayName": b.display_name,
+                "execution": {
+                    "preferredClass": b.execution.preferred_class,
+                    "preferredEngine": b.execution.preferred_engine,
+                    "fallbackEngines": b.execution.fallback_engines,
+                    "effort": b.execution.effort,
+                    "defaultModel": b.execution.default_model,
+                    "reviewRequirements": b.execution.review_requirements,
+                    "memoryDefaults": b.execution.memory_defaults,
+                }
+            })
+        })
+        .collect()
+}
+
+#[tauri::command]
+pub fn resolve_execution(builder: Option<String>, class: Option<String>) -> serde_json::Value {
+    let mgr = crate::execution::manager::ExecutionManager::new();
+    let ctx = crate::execution::ExecutionContext::local("resolve".to_string());
+    let req = crate::execution::ExecutionRequest::chat(
+        crate::models::Conversation::new("resolve", crate::models::Model::Custom("resolve".to_string())),
+        None,
+    );
+    let cls = class.map(|c| ExecutionClass::from_str(&c)).unwrap_or(ExecutionClass::Implementation);
+    let res = crate::execution::manager::ExecutionManager::resolve(builder.as_deref(), Some(cls), &ctx, &req);
+    serde_json::json!({
+        "engineId": res.engine_id,
+        "model": res.model,
+        "effort": res.effort,
+        "reason": res.reason,
+        "class": res.class.as_str(),
+    })
 }
 
 #[tauri::command]

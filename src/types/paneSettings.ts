@@ -1,17 +1,24 @@
-export type OpenAiModelId = "gpt-5.5" | "gpt-5.4-mini" | "gpt-5.3-codex-spark";
-export type ReasoningLevel = "low" | "medium" | "high" | "xhigh";
+export type EngineId = string;
+export type ModelId = string;
+export type EffortLevel = "low" | "medium" | "high" | "max";
 
 export interface PaneSettings {
-  modelId: OpenAiModelId;
-  reasoningLevel: ReasoningLevel;
+  engineId: EngineId;
+  modelId: ModelId;
+  effort: EffortLevel;
 }
 
-export interface ModelOption {
-  id: OpenAiModelId;
+export interface EngineOption {
+  id: EngineId;
   label: string;
 }
 
-export interface ReasoningOption {
-  id: ReasoningLevel;
+export interface ModelOption {
+  id: ModelId;
+  label: string;
+}
+
+export interface EffortOption {
+  id: EffortLevel;
   label: string;
 }

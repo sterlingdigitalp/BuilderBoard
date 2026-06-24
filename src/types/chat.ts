@@ -33,7 +33,7 @@ export interface MessageCreateInput {
 
 export interface StreamChatInput {
   paneId: string;
-  providerId: "openai";
+  providerId: string;
   accountId: string;
   modelId: string;
   assistantMessageId: string;

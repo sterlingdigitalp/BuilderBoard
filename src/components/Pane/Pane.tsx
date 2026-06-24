@@ -71,19 +71,30 @@ export function Pane({
       <header className="pane__header">
         <h2 id={`${pane.id}-title`}>{paneNumber}</h2>
         <ChatControls
+          builders={chat.builders}
+          selectedBuilderId={chat.selectedBuilderId}
+          engines={chat.engines}
+          selectedEngineId={chat.selectedEngineId}
           accounts={chat.accounts}
           selectedAccountId={chat.selectedAccountId}
           selectedModelId={chat.selectedModelId}
-          selectedReasoningLevel={chat.selectedReasoningLevel}
+          selectedEffort={chat.selectedEffort}
           projects={projects}
           project={project}
           disabled={isControlsDisabled}
+          onSelectBuilder={chat.selectBuilder}
+          onSelectEngine={chat.selectEngine}
           onSelectAccount={chat.setSelectedAccountId}
           onSelectModel={chat.selectModel}
-          onSelectReasoning={chat.selectReasoning}
+          onSelectEffort={chat.selectEffort}
           onSelectProject={onSelectProject}
           onCreateProject={onCreateProject}
         />
+        {chat.engines.length > 0 && (
+          <div style={{ fontSize: "0.6rem", opacity: 0.7, padding: "0 4px" }} title="Engine capabilities and health">
+            {chat.selectedEngineId} | {chat.engines.find(e => e.id === chat.selectedEngineId)?.health} | efforts: {chat.engines.find(e => e.id === chat.selectedEngineId)?.supportedEfforts?.join(",")}
+          </div>
+        )}
         {status ? (
           <span className="pane__status" aria-live="polite">
             {status}

@@ -127,14 +127,63 @@ pub async fn run_background_stream_chat_inner<R: Runtime>(
     // Route ALL execution through the (now generalized) ExecutionEngine abstraction.
     // The abstraction is execution-centric. OpenAI remains the only engine for now
     // and produces exactly the same deltas, metrics, and side-effects as before.
-    // Selection supports both OpenAI (by provider "openai") and GrokBuild (by model containing "grok")
-    // This allows validation of multiple engines through the exact same ExecutionManager/registry path
-    // without any UI or pane model changes.
-    let engine_key = if job.model_id.to_lowercase().contains("grok") || job.provider_id.to_lowercase().contains("grok") {
-        "grok".to_string()
+    // Phase 8.9E: Intelligent routing via ExecutionManager when a Builder is indicated.
+    // Builder intent + class -> scored engine selection with reason.
+    // Falls back gracefully. Manual (non-builder) paths unchanged.
+    let manager = crate::execution::manager::ExecutionManager::new();
+    let exec_ctx = prepared.execution_context.clone(); // reuse for context (limited but sufficient)
+
+    let resolution = if job.provider_id == "builder-a" || job.provider_id == "builder-b" || job.provider_id == "builder-c" {
+        // Builder selected as "provider" for demo; derive class from model or default Implementation
+        let class = if job.model_id.to_lowercase().contains("review") || job.model_id.to_lowercase().contains("arch") {
+            crate::execution::ExecutionClass::Review
+        } else if job.model_id.to_lowercase().contains("test") || job.model_id.to_lowercase().contains("debug") {
+            crate::execution::ExecutionClass::Testing
+        } else {
+            crate::execution::ExecutionClass::Implementation
+        };
+        // Use manager for intelligent choice + reason (logged). Use minimal context for resolution.
+        // Minimal resolution call (context passed is approximate for this phase)
+        let dummy_ctx = crate::execution::ExecutionContext::local(job.pane_id.clone());
+        let res = crate::execution::manager::ExecutionManager::resolve(Some(&job.provider_id), Some(class.clone()), &dummy_ctx, &crate::execution::ExecutionRequest::chat(
+            // Use empty conversation for resolution decision only (real one is prepared later)
+            crate::models::Conversation::new("resolution", crate::models::Model::Custom("decision".into())),
+            job.reasoning_level.clone()
+        ));
+        eprintln!("[ExecutionManager] Builder={} Class={} -> Engine={} Model={} Reason: {}",
+            job.provider_id, class.as_str(), res.engine_id, res.model, res.reason);
+        res
+    } else if job.model_id.to_lowercase().contains("grok") || job.provider_id.to_lowercase().contains("grok") {
+        // Direct grok model
+        crate::execution::ExecutionResolution {
+            engine_id: "grok".to_string(),
+            model: job.model_id.clone(),
+            effort: job.reasoning_level.clone().unwrap_or_else(|| "high".to_string()),
+            reason: "Direct grok model selection".to_string(),
+            class: crate::execution::ExecutionClass::Implementation,
+            policy_applied: false,
+        }
     } else {
-        job.provider_id.clone()
+        // Legacy / OpenAI direct
+        crate::execution::ExecutionResolution {
+            engine_id: job.provider_id.clone(),
+            model: job.model_id.clone(),
+            effort: job.reasoning_level.clone().unwrap_or_else(|| "medium".to_string()),
+            reason: "Direct provider/model selection".to_string(),
+            class: crate::execution::ExecutionClass::General,
+            policy_applied: false,
+        }
     };
+
+    let engine_key = resolution.engine_id.clone();
+    let effective_model = resolution.model.clone();
+    let effective_effort = resolution.effort.clone();
+
+    // Note: We keep using conversation as-is (manager decision logged). Model/effort could be injected but to avoid changing execution behavior we note them.
+    if !resolution.reason.is_empty() {
+        // Surface reason for diagnostics (no UI change required)
+        crate::runtime_diagnostics::trace_runtime_phase("execution_manager_decision", &resolution.reason);
+    }
 
     let engine = global_engine_registry()
         .get(&engine_key)

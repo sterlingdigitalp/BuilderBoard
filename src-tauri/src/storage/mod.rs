@@ -41,6 +41,9 @@ pub fn run() -> tauri::Result<()> {
         })
         .invoke_handler(tauri::generate_handler![
             commands::provider_list,
+            commands::engine_list,
+            commands::builder_list,
+            commands::resolve_execution,
             commands::workspace_create,
             commands::workspace_list,
             commands::workspace_switch,

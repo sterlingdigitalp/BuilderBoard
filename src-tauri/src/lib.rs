@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod builders;
 pub mod chat;
 pub mod execution;
 pub mod filesystem_intent;

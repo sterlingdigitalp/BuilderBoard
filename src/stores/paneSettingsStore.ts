@@ -1,27 +1,25 @@
 import type { PaneDefinition } from "../types/layout";
 import type {
+  EffortLevel,
+  EffortOption,
+  EngineId,
+  ModelId,
   ModelOption,
-  OpenAiModelId,
-  PaneSettings,
-  ReasoningLevel,
-  ReasoningOption
+  PaneSettings
 } from "../types/paneSettings";
 
 const paneSettingsKey = "builderboard.paneSettings.v1";
-const defaultModelId: OpenAiModelId = "gpt-5.5";
-const defaultReasoningLevel: ReasoningLevel = "medium";
+const defaultEngineId: EngineId = "openai";
+const defaultModelId: ModelId = "GPT-5.5";
+const defaultEffort: EffortLevel = "medium";
 
-export const openAiModelOptions: ModelOption[] = [
-  { id: "gpt-5.5", label: "GPT-5.5" },
-  { id: "gpt-5.4-mini", label: "GPT-5.4 mini" },
-  { id: "gpt-5.3-codex-spark", label: "GPT-5.3 Codex Spark" }
-];
+export const defaultEngineOptions: { id: EngineId; label: string }[] = []; // populated dynamically
 
-export const reasoningOptions: ReasoningOption[] = [
+export const defaultEffortOptions: EffortOption[] = [
   { id: "low", label: "Low" },
   { id: "medium", label: "Medium" },
   { id: "high", label: "High" },
-  { id: "xhigh", label: "XHigh" }
+  { id: "max", label: "Max" }
 ];
 
 type PaneSettingsState = Record<string, PaneSettings>;
@@ -30,12 +28,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
-function isModelId(value: unknown): value is OpenAiModelId {
-  return typeof value === "string" && openAiModelOptions.some((option) => option.id === value);
+function isEngineId(value: unknown): value is EngineId {
+  return typeof value === "string";
 }
 
-function isReasoningLevel(value: unknown): value is ReasoningLevel {
-  return typeof value === "string" && reasoningOptions.some((option) => option.id === value);
+function isModelId(value: unknown): value is ModelId {
+  return typeof value === "string";
+}
+
+function isEffortLevel(value: unknown): value is EffortLevel {
+  return typeof value === "string" && defaultEffortOptions.some((option) => option.id === value);
 }
 
 function readSettingsState(): PaneSettingsState {
@@ -68,10 +70,9 @@ function settingsFromMetadata(pane: PaneDefinition): Partial<PaneSettings> {
     }
 
     return {
+      engineId: isEngineId(metadata.engineId) ? metadata.engineId : undefined,
       modelId: isModelId(metadata.modelId) ? metadata.modelId : undefined,
-      reasoningLevel: isReasoningLevel(metadata.reasoningLevel)
-        ? metadata.reasoningLevel
-        : undefined
+      effort: isEffortLevel(metadata.effort) ? metadata.effort : undefined
     };
   } catch {
     return {};
@@ -83,14 +84,18 @@ export function paneSettingsFor(pane: PaneDefinition): PaneSettings {
   const metadataSettings = settingsFromMetadata(pane);
 
   return {
+    engineId:
+      savedSettings?.engineId ??
+      metadataSettings.engineId ??
+      (isEngineId(pane.providerId) ? pane.providerId : defaultEngineId),
     modelId:
       savedSettings?.modelId ??
       metadataSettings.modelId ??
       (isModelId(pane.modelId) ? pane.modelId : defaultModelId),
-    reasoningLevel:
-      savedSettings?.reasoningLevel ??
-      metadataSettings.reasoningLevel ??
-      defaultReasoningLevel
+    effort:
+      savedSettings?.effort ??
+      metadataSettings.effort ??
+      defaultEffort
   };
 }
 
@@ -100,8 +105,9 @@ export function updatePaneSettings(
 ): PaneSettings {
   const currentSettings = paneSettingsFor(pane);
   const nextSettings = {
+    engineId: patch.engineId ?? currentSettings.engineId,
     modelId: patch.modelId ?? currentSettings.modelId,
-    reasoningLevel: patch.reasoningLevel ?? currentSettings.reasoningLevel
+    effort: patch.effort ?? currentSettings.effort
   };
 
   writeSettingsState({

@@ -10,6 +10,7 @@ pub mod context;
 pub mod engine;
 pub mod event;
 pub mod grok_build;
+pub mod manager;
 pub mod request;
 
 pub use engine::{
@@ -21,4 +22,5 @@ pub use grok_build::GrokBuildExecutionEngine;
 pub use capabilities::EngineCapabilities;
 pub use context::ExecutionContext;
 pub use event::ExecutionEvent;
+pub use manager::{ExecutionClass, ExecutionManager, ExecutionProfile, ExecutionResolution};
 pub use request::ExecutionRequest;

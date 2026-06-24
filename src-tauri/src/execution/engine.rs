@@ -44,6 +44,22 @@ pub trait ExecutionEngine: Send + Sync {
 
     fn capabilities(&self) -> EngineCapabilities;
 
+    fn display_name(&self) -> String {
+        self.engine_id().to_string()
+    }
+
+    fn list_models(&self) -> Vec<String> {
+        vec![]
+    }
+
+    fn supported_effort_levels(&self) -> Vec<String> {
+        vec!["medium".to_string()]
+    }
+
+    fn health(&self) -> String {
+        "available".to_string()
+    }
+
     /// Primary generic entry point.
     ///
     /// The engine receives a rich context (project/fs/optional creds/cancellation)
@@ -93,6 +109,28 @@ impl ExecutionEngine for OpenAIExecutionEngine {
 
     fn capabilities(&self) -> EngineCapabilities {
         EngineCapabilities::for_openai()
+    }
+
+    fn display_name(&self) -> String {
+        "OpenAI".to_string()
+    }
+
+    fn list_models(&self) -> Vec<String> {
+        vec![
+            "GPT-5.5".to_string(),
+            "GPT-5.5 Thinking".to_string(),
+            "gpt-4o-mini".to_string(),
+            "GPT-5.4 mini".to_string(),
+            "GPT-5.3 Codex Spark".to_string(),
+        ]
+    }
+
+    fn supported_effort_levels(&self) -> Vec<String> {
+        vec!["low".to_string(), "medium".to_string(), "high".to_string(), "max".to_string()]
+    }
+
+    fn health(&self) -> String {
+        "available".to_string()
     }
 
     fn execute(

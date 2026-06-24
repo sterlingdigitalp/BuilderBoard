@@ -228,6 +228,33 @@ impl ExecutionEngine for GrokBuildExecutionEngine {
         caps
     }
 
+    fn display_name(&self) -> String {
+        "Grok".to_string()
+    }
+
+    fn list_models(&self) -> Vec<String> {
+        vec![
+            "grok-build".to_string(),
+            "Composer 2.5 Fast".to_string(),
+            "Grok Build".to_string(),
+        ]
+    }
+
+    fn supported_effort_levels(&self) -> Vec<String> {
+        vec!["low".to_string(), "medium".to_string(), "high".to_string(), "max".to_string()]
+    }
+
+    fn health(&self) -> String {
+        // Check if grok CLI binary is available
+        if std::process::Command::new("grok").arg("--version").output().is_ok() {
+            "available".to_string()
+        } else if std::path::Path::new("/Users/sterlingdigital/.grok/bin/grok").exists() {
+            "available".to_string()
+        } else {
+            "cli missing".to_string()
+        }
+    }
+
     fn execute(
         &self,
         context: ExecutionContext,

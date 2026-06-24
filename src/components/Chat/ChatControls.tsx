@@ -1,22 +1,30 @@
 import type { CSSProperties } from "react";
 import type { AccountDto } from "../../types/accounts";
-import type { OpenAiModelId, ReasoningLevel } from "../../types/paneSettings";
+import type { EffortLevel, ModelId } from "../../types/paneSettings";
 import type { ProjectDto } from "../../types/projects";
-import { openAiModelOptions, reasoningOptions } from "../../stores/paneSettingsStore";
+import type { EngineInfo } from "../../stores/engineCommands";
+import type { BuilderInfo } from "../../stores/builderCommands";
+import { defaultEffortOptions } from "../../stores/paneSettingsStore";
 
 export const NEW_PROJECT_VALUE = "__new_project__";
 
 interface ChatControlsProps {
+  builders: BuilderInfo[];
+  selectedBuilderId: string;
+  engines: EngineInfo[];
+  selectedEngineId: string;
   accounts: AccountDto[];
   selectedAccountId: string;
-  selectedModelId: OpenAiModelId;
-  selectedReasoningLevel: ReasoningLevel;
+  selectedModelId: ModelId;
+  selectedEffort: EffortLevel;
   projects: ProjectDto[];
   project: ProjectDto | null;
   disabled: boolean;
+  onSelectBuilder: (builderName: string) => void;
+  onSelectEngine: (engineId: string) => void;
   onSelectAccount: (accountId: string) => void;
-  onSelectModel: (modelId: OpenAiModelId) => void;
-  onSelectReasoning: (reasoningLevel: ReasoningLevel) => void;
+  onSelectModel: (modelId: ModelId) => void;
+  onSelectEffort: (effort: EffortLevel) => void;
   onSelectProject: (projectId: string) => void;
   onCreateProject: () => void;
 }
@@ -69,32 +77,69 @@ function projectTooltip(project: ProjectDto | null): string {
 }
 
 export function ChatControls({
+  builders,
+  selectedBuilderId,
+  engines,
+  selectedEngineId,
   accounts,
   selectedAccountId,
   selectedModelId,
-  selectedReasoningLevel,
+  selectedEffort,
   projects,
   project,
   disabled,
+  onSelectBuilder,
+  onSelectEngine,
   onSelectAccount,
   onSelectModel,
-  onSelectReasoning,
+  onSelectEffort,
   onSelectProject,
   onCreateProject
 }: ChatControlsProps) {
   const selectedProjectId = project?.id ?? "";
+  const currentEngine = engines.find((e) => e.id === selectedEngineId) || engines[0];
+  const modelOptions = currentEngine ? currentEngine.models.map(m => ({id: m, label: m})) : [];
+  const effortOptions = currentEngine ? currentEngine.supportedEfforts.map(e => ({id: e as any, label: e})) : defaultEffortOptions;
 
   return (
     <div style={rowStyle} aria-label="Chat controls">
       <label style={fieldStyle}>
-        <select style={selectStyle} value="openai" disabled={disabled} aria-label="Provider">
-          <option value="openai">OpenAI</option>
-          <option value="anthropic" disabled>
-            Anthropic
-          </option>
-          <option value="google" disabled>
-            Google
-          </option>
+        <select
+          style={selectStyle}
+          value={selectedBuilderId}
+          disabled={disabled || builders.length === 0}
+          onChange={(event) => onSelectBuilder(event.target.value)}
+          aria-label="Builder"
+        >
+          {builders.length === 0 ? (
+            <option value="">No builders</option>
+          ) : (
+            builders.map((b) => (
+              <option key={b.name} value={b.name}>
+                {b.displayName}
+              </option>
+            ))
+          )}
+        </select>
+      </label>
+
+      <label style={fieldStyle}>
+        <select
+          style={selectStyle}
+          value={selectedEngineId}
+          disabled={disabled || engines.length === 0}
+          onChange={(event) => onSelectEngine(event.target.value)}
+          aria-label="Engine"
+        >
+          {engines.length === 0 ? (
+            <option value="">No engines</option>
+          ) : (
+            engines.map((eng) => (
+              <option key={eng.id} value={eng.id}>
+                {eng.displayName} ({eng.health})
+              </option>
+            ))
+          )}
         </select>
       </label>
 
@@ -102,9 +147,9 @@ export function ChatControls({
         <select
           style={selectStyle}
           value={selectedAccountId}
-          disabled={disabled || accounts.length === 0}
+          disabled={disabled || accounts.length === 0 || selectedEngineId === "grok"}
           onChange={(event) => onSelectAccount(event.target.value)}
-          aria-label="OpenAI account"
+          aria-label="Account"
         >
           {accounts.length === 0 ? (
             <option value="">None</option>
@@ -153,11 +198,11 @@ export function ChatControls({
         <select
           style={selectStyle}
           value={selectedModelId}
-          disabled={disabled}
-          onChange={(event) => onSelectModel(event.target.value as OpenAiModelId)}
-          aria-label="OpenAI model"
+          disabled={disabled || modelOptions.length === 0}
+          onChange={(event) => onSelectModel(event.target.value as ModelId)}
+          aria-label="Model"
         >
-          {openAiModelOptions.map((option) => (
+          {modelOptions.map((option) => (
             <option key={option.id} value={option.id}>
               {option.label}
             </option>
@@ -168,12 +213,12 @@ export function ChatControls({
       <label style={fieldStyle}>
         <select
           style={selectStyle}
-          value={selectedReasoningLevel}
-          disabled={disabled}
-          onChange={(event) => onSelectReasoning(event.target.value as ReasoningLevel)}
-          aria-label="Reasoning level"
+          value={selectedEffort}
+          disabled={disabled || effortOptions.length === 0}
+          onChange={(event) => onSelectEffort(event.target.value as EffortLevel)}
+          aria-label="Effort"
         >
-          {reasoningOptions.map((option) => (
+          {effortOptions.map((option) => (
             <option key={option.id} value={option.id}>
               {option.label}
             </option>

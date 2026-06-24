@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { accountList } from "../stores/accountCommands";
+import { engineList, type EngineInfo } from "../stores/engineCommands";
+import { builderList, type BuilderInfo } from "../stores/builderCommands";
 import {
   messageCreate,
   messageError,
@@ -16,24 +18,28 @@ import { probeCrossPaneInteraction, runtimeTraceEnabled } from "../stores/runtim
 import type { AccountDto } from "../types/accounts";
 import type { ChatDisplayState, MessageDto } from "../types/chat";
 import type { PaneDefinition } from "../types/layout";
-import type { OpenAiModelId, ReasoningLevel } from "../types/paneSettings";
-
-const openAiProviderId = "openai";
+import type { EffortLevel, ModelId } from "../types/paneSettings";
 
 export interface PaneChatState {
   accounts: AccountDto[];
+  builders: BuilderInfo[];
+  selectedBuilderId: string;
+  engines: EngineInfo[];
   messages: MessageDto[];
+  selectedEngineId: string;
   selectedAccountId: string;
-  selectedModelId: OpenAiModelId;
-  selectedReasoningLevel: ReasoningLevel;
+  selectedModelId: ModelId;
+  selectedEffort: EffortLevel;
   inputValue: string;
   displayState: ChatDisplayState;
   isLoading: boolean;
   error: string | null;
   canSend: boolean;
   setSelectedAccountId: (accountId: string) => void;
-  selectModel: (modelId: OpenAiModelId) => void;
-  selectReasoning: (reasoningLevel: ReasoningLevel) => void;
+  selectBuilder: (builderName: string) => void;
+  selectEngine: (engineId: string) => void;
+  selectModel: (modelId: ModelId) => void;
+  selectEffort: (effort: EffortLevel) => void;
   setInputValue: (value: string) => void;
   sendMessage: () => Promise<void>;
 }
@@ -43,7 +49,7 @@ function errorMessage(error: unknown): string {
 }
 
 function activeOpenAiAccounts(accounts: AccountDto[]): AccountDto[] {
-  return accounts.filter((account) => account.providerId === openAiProviderId && account.status === "active");
+  return accounts.filter((account) => account.providerId === "openai" && account.status === "active");
 }
 
 function replaceMessage(messages: MessageDto[], nextMessage: MessageDto): MessageDto[] {
@@ -71,17 +77,23 @@ function streamMessage(messages: MessageDto[], messageId: string, delta: string)
 export function usePaneChat(pane: PaneDefinition): PaneChatState {
   const initialSettings = paneSettingsFor(pane);
   const [accounts, setAccounts] = useState<AccountDto[]>([]);
+  const [engines, setEngines] = useState<EngineInfo[]>([]);
+  const [builders, setBuilders] = useState<BuilderInfo[]>([]);
+  const [selectedBuilderId, setSelectedBuilderId] = useState("");
   const [messages, setMessages] = useState<MessageDto[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState("");
+  const [selectedEngineId, setSelectedEngineId] = useState(initialSettings.engineId);
   const [selectedModelId, setSelectedModelId] = useState(initialSettings.modelId);
-  const [selectedReasoningLevel, setSelectedReasoningLevel] =
-    useState(initialSettings.reasoningLevel);
+  const [selectedEffort, setSelectedEffort] = useState<EffortLevel>(initialSettings.effort);
+  // Builder selected separately, can auto-apply to engine/model/effort
   const [inputValue, setInputValue] = useState("");
   const [displayState, setDisplayState] = useState<ChatDisplayState>("idle");
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const openAiAccounts = useMemo(() => activeOpenAiAccounts(accounts), [accounts]);
+  const currentEngine = useMemo(() => engines.find((e) => e.id === selectedEngineId) || engines[0], [engines, selectedEngineId]);
+  const currentModels = useMemo(() => currentEngine?.models || [selectedModelId], [currentEngine, selectedModelId]);
+  const currentEfforts = useMemo(() => currentEngine?.supportedEfforts || [selectedEffort], [currentEngine, selectedEffort]);
 
   const reloadMessages = useCallback(async () => {
     try {
@@ -94,7 +106,7 @@ export function usePaneChat(pane: PaneDefinition): PaneChatState {
 
   const canSend =
     inputValue.trim().length > 0 &&
-    selectedAccountId.length > 0 &&
+    (selectedEngineId === "grok" || selectedAccountId.length > 0) &&
     (displayState === "idle" || displayState === "error");
 
   useEffect(() => {
@@ -105,31 +117,38 @@ export function usePaneChat(pane: PaneDefinition): PaneChatState {
       setError(null);
 
       try {
-        const [loadedAccounts, loadedMessages] = await Promise.all([
-          accountList(openAiProviderId),
-          messageList(pane.id)
+        const [loadedAccounts, loadedMessages, loadedEngines, loadedBuilders] = await Promise.all([
+          accountList("openai"),
+          messageList(pane.id),
+          engineList(),
+          builderList()
         ]);
 
         if (!isActive) {
           return;
         }
 
-        const openAiAccounts = activeOpenAiAccounts(loadedAccounts);
-        const paneAccount = openAiAccounts.find((account) => account.id === pane.accountId);
-        const defaultAccount = openAiAccounts.find((account) => account.isDefault);
         const settings = paneSettingsFor(pane);
+        const activeEngine = loadedEngines.find((e) => e.id === settings.engineId) || loadedEngines[0];
 
         setAccounts(loadedAccounts);
+        setEngines(loadedEngines);
+        setBuilders(loadedBuilders);
         setMessages(loadedMessages);
+        const initialBuilder = loadedBuilders.find((b) => b.execution.preferredEngine === settings.engineId)?.name || "builder-c";
+        setSelectedBuilderId(initialBuilder);
         setSelectedAccountId((currentAccountId) => {
+          const openAiAccounts = loadedAccounts.filter((a) => a.providerId === "openai" && a.status === "active");
           if (openAiAccounts.some((account) => account.id === currentAccountId)) {
             return currentAccountId;
           }
-
+          const paneAccount = openAiAccounts.find((account) => account.id === pane.accountId);
+          const defaultAccount = openAiAccounts.find((account) => account.isDefault);
           return paneAccount?.id ?? defaultAccount?.id ?? openAiAccounts[0]?.id ?? "";
         });
-        setSelectedModelId(settings.modelId);
-        setSelectedReasoningLevel(settings.reasoningLevel);
+        setSelectedEngineId(settings.engineId || (activeEngine?.id ?? "openai"));
+        setSelectedModelId(settings.modelId || (activeEngine?.models[0] ?? settings.modelId));
+        setSelectedEffort(settings.effort);
         setDisplayState("idle");
       } catch (loadError) {
         if (isActive) {
@@ -148,12 +167,33 @@ export function usePaneChat(pane: PaneDefinition): PaneChatState {
     return () => { isActive = false; };
   }, [pane.accountId, pane.id, pane.modelId]);
 
-  const selectModel = useCallback((modelId: OpenAiModelId) => {
+  const selectEngine = useCallback((engineId: string) => {
+    const next = updatePaneSettings(pane, { engineId });
+    setSelectedEngineId(next.engineId);
+  }, [pane]);
+
+  const selectBuilder = useCallback((builderName: string) => {
+    const builder = builders.find((b) => b.name === builderName);
+    if (builder) {
+      const exec = builder.execution;
+      setSelectedBuilderId(builderName);
+      const nextSettings = updatePaneSettings(pane, {
+        engineId: exec.preferredEngine,
+        modelId: exec.defaultModel,
+        effort: (exec.effort as any) || "medium",
+      });
+      setSelectedEngineId(nextSettings.engineId);
+      setSelectedModelId(nextSettings.modelId);
+      setSelectedEffort(nextSettings.effort);
+    }
+  }, [pane, builders]);
+
+  const selectModel = useCallback((modelId: ModelId) => {
     setSelectedModelId(updatePaneSettings(pane, { modelId }).modelId);
   }, [pane]);
 
-  const selectReasoning = useCallback((reasoningLevel: ReasoningLevel) => {
-    setSelectedReasoningLevel(updatePaneSettings(pane, { reasoningLevel }).reasoningLevel);
+  const selectEffort = useCallback((effort: EffortLevel) => {
+    setSelectedEffort(updatePaneSettings(pane, { effort }).effort);
   }, [pane]);
 
   useEffect(() => {
@@ -299,10 +339,10 @@ export function usePaneChat(pane: PaneDefinition): PaneChatState {
 
     try {
       const metadataJson = JSON.stringify({
-        providerId: openAiProviderId,
+        providerId: selectedEngineId,
         accountId: selectedAccountId,
         modelId: selectedModelId,
-        reasoningLevel: selectedReasoningLevel
+        reasoningLevel: selectedEffort
       });
       const created = await messageCreate({
         paneId: pane.id,
@@ -319,7 +359,7 @@ export function usePaneChat(pane: PaneDefinition): PaneChatState {
 
       void streamChat({
         paneId: pane.id,
-        providerId: openAiProviderId,
+        providerId: selectedEngineId,
         accountId: selectedAccountId,
         modelId: selectedModelId,
         assistantMessageId
@@ -357,22 +397,28 @@ export function usePaneChat(pane: PaneDefinition): PaneChatState {
       setError(message);
       setDisplayState("error");
     }
-  }, [inputValue, pane.id, reloadMessages, selectedAccountId, selectedModelId, selectedReasoningLevel]);
+  }, [inputValue, pane.id, reloadMessages, selectedAccountId, selectedModelId, selectedEffort, selectedEngineId]);
 
   return {
-    accounts: openAiAccounts,
+    accounts,
     messages,
+    builders,
+    selectedBuilderId,
+    engines,
+    selectedEngineId,
     selectedAccountId,
     selectedModelId,
-    selectedReasoningLevel,
+    selectedEffort,
     inputValue,
     displayState,
     isLoading,
     error,
     canSend,
     setSelectedAccountId,
+    selectBuilder,
+    selectEngine,
     selectModel,
-    selectReasoning,
+    selectEffort,
     setInputValue,
     sendMessage
   };

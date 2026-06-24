@@ -159,6 +159,34 @@ export function usePaneChat(pane: PaneDefinition): PaneChatState {
   useEffect(() => {
     let isActive = true;
     const cleanupFns: Array<() => void> = [];
+    const pendingDeltas = new Map<string, string>();
+    let flushFrameId: number | null = null;
+
+    const flushPendingDeltas = () => {
+      flushFrameId = null;
+      if (!isActive || pendingDeltas.size === 0) {
+        return;
+      }
+
+      const deltas = new Map(pendingDeltas);
+      pendingDeltas.clear();
+      setDisplayState("streaming");
+      setMessages((currentMessages) => {
+        let nextMessages = currentMessages;
+        for (const [messageId, delta] of deltas) {
+          nextMessages = streamMessage(nextMessages, messageId, delta);
+        }
+        return nextMessages;
+      });
+    };
+
+    const queueStreamDelta = (messageId: string, delta: string) => {
+      pendingDeltas.set(messageId, `${pendingDeltas.get(messageId) ?? ""}${delta}`);
+      if (flushFrameId !== null) {
+        return;
+      }
+      flushFrameId = window.requestAnimationFrame(flushPendingDeltas);
+    };
 
     async function bindStreamEvents() {
       try {
@@ -182,8 +210,7 @@ export function usePaneChat(pane: PaneDefinition): PaneChatState {
               return;
             }
 
-            setDisplayState("streaming");
-            setMessages((currentMessages) => streamMessage(currentMessages, payload.messageId, payload.delta));
+            queueStreamDelta(payload.messageId, payload.delta);
           })
         );
 
@@ -221,7 +248,14 @@ export function usePaneChat(pane: PaneDefinition): PaneChatState {
 
     void bindStreamEvents();
 
-    return () => { isActive = false; cleanupFns.forEach((cleanup) => cleanup()); };
+    return () => {
+      isActive = false;
+      if (flushFrameId !== null) {
+        window.cancelAnimationFrame(flushFrameId);
+      }
+      pendingDeltas.clear();
+      cleanupFns.forEach((cleanup) => cleanup());
+    };
   }, [pane.id, reloadMessages]);
 
   useEffect(() => {

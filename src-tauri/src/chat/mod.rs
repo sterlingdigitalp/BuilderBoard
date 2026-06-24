@@ -1,7 +1,8 @@
-use chrono::Utc;
+
 use rusqlite::Connection;
 
-use crate::auth::{CredentialHandle, CredentialService};
+use crate::auth::{CredentialHandle, CredentialService, OAuthService};
+use crate::storage::db::Database;
 use crate::models::{Conversation, Message, MessageRole, Model};
 use crate::providers::{
     resolve_openai_provider_with_api_key, resolve_openai_provider_with_bearer_token,
@@ -212,7 +213,16 @@ impl ProviderResolutionService {
         connection: &Connection,
         pane_id: &str,
     ) -> Result<PaneExecutionContext, ProviderResolutionError> {
-        let (provider, credential) = Self::resolve_provider_and_credential(connection, pane_id)?;
+        let pane = PaneRepository::get_open_for_execution(connection, pane_id)
+            .map_err(|error| ProviderResolutionError::storage(error.to_string()))?;
+        Self::load_execution_context_from_pane(connection, &pane)
+    }
+
+    pub fn load_execution_context_from_pane(
+        connection: &Connection,
+        pane: &crate::storage::models::PaneDto,
+    ) -> Result<PaneExecutionContext, ProviderResolutionError> {
+        let (provider, credential) = Self::resolve_provider_and_credential_from_pane(connection, pane)?;
         if provider.provider_type != "openai" {
             return Err(ProviderResolutionError::unsupported_provider(
                 provider.id,
@@ -232,6 +242,31 @@ impl ProviderResolutionService {
             credential,
             oauth_external_account_id,
         })
+    }
+
+    pub fn refresh_oauth_access_token_if_needed(
+        database: &Database,
+        credentials: &CredentialService,
+        oauth: &OAuthService,
+        context: &PaneExecutionContext,
+    ) -> Result<(), ProviderResolutionError> {
+        if context.credential.auth_type != "oauth" {
+            return Ok(());
+        }
+
+        let credential = credentials
+            .read_oauth_credential(&context.credential.credential_ref)
+            .map_err(|error| ProviderResolutionError::storage(error.to_string()))?;
+        let should_refresh = CredentialService::oauth_access_token_needs_refresh(&credential)
+            .map_err(|error| ProviderResolutionError::storage(error.to_string()))?;
+
+        if should_refresh {
+            oauth
+                .refresh_oauth_access_token(database, credentials, &context.credential.account_id)
+                .map_err(|error| ProviderResolutionError::storage(error.to_string()))?;
+        }
+
+        Ok(())
     }
 
     pub fn resolve_openai_provider(
@@ -285,8 +320,15 @@ impl ProviderResolutionService {
         connection: &Connection,
         pane_id: &str,
     ) -> Result<(ProviderDto, CredentialHandle), ProviderResolutionError> {
-        let pane = PaneRepository::get_open_by_id(connection, pane_id)
+        let pane = PaneRepository::get_open_for_execution(connection, pane_id)
             .map_err(|error| ProviderResolutionError::storage(error.to_string()))?;
+        Self::resolve_provider_and_credential_from_pane(connection, &pane)
+    }
+
+    fn resolve_provider_and_credential_from_pane(
+        connection: &Connection,
+        pane: &crate::storage::models::PaneDto,
+    ) -> Result<(ProviderDto, CredentialHandle), ProviderResolutionError> {
         let provider_id = pane
             .provider_id
             .as_deref()
@@ -339,14 +381,14 @@ impl ProviderResolutionService {
             ));
         }
 
-        if account.status == "expired" {
+        if account.status == "expired" && account.auth_type != "oauth" {
             return Err(ProviderResolutionError::expired_account(
                 provider_id,
                 account.id,
             ));
         }
 
-        if account.status != "active" {
+        if account.status != "active" && account.status != "expired" {
             return Err(ProviderResolutionError::inactive_account(
                 provider_id,
                 account.id,
@@ -354,16 +396,7 @@ impl ProviderResolutionService {
             ));
         }
 
-        if account.auth_type == "oauth" {
-            if let Some(expires_at) = account.token_expires_at.as_deref() {
-                if is_expired(expires_at) {
-                    return Err(ProviderResolutionError::expired_account(
-                        provider_id,
-                        account.id,
-                    ));
-                }
-            }
-        }
+        // OAuth access tokens are refreshed at execution time instead of hard-failing here.
 
         let credential_ref = AccountRepository::credential_ref(connection, &account.id)
             .map_err(|error| ProviderResolutionError::storage(error.to_string()))?;
@@ -413,12 +446,6 @@ fn trace_execution_step(component: &str, message: &str) {
     }
 }
 
-fn is_expired(expires_at: &str) -> bool {
-    chrono::DateTime::parse_from_rfc3339(expires_at)
-        .map(|expires_at| expires_at.with_timezone(&Utc) <= Utc::now())
-        .unwrap_or(false)
-}
-
 fn conversation_for_pane(
     connection: &Connection,
     pane_id: &str,
@@ -452,12 +479,7 @@ fn openai_model_from_id(model_id: &str) -> Model {
 }
 
 fn message_role(role: &str) -> Option<MessageRole> {
-    match role {
-        "system" => Some(MessageRole::System),
-        "user" => Some(MessageRole::User),
-        "assistant" => Some(MessageRole::Assistant),
-        _ => None,
-    }
+    crate::models::message_role_from_db(role)
 }
 
 #[cfg(test)]
@@ -814,7 +836,7 @@ mod tests {
     }
 
     #[test]
-    fn expired_account_status_is_rejected() -> StorageResult<()> {
+    fn expired_oauth_account_status_allows_refresh_at_execution() -> StorageResult<()> {
         let conn = rusqlite::Connection::open_in_memory()?;
         conn.execute_batch(crate::storage::migrations::MIGRATIONS_FOR_TEST)?;
         AccountRepository::insert_test_account(
@@ -827,18 +849,39 @@ mod tests {
         )?;
         let pane = create_bound_pane(&conn, "google", Some("expired-google"))?;
 
-        let error = match ProviderResolutionService::resolve_for_pane(&conn, &pane.id) {
-            Ok(_) => panic!("expired account should not resolve"),
-            Err(error) => error,
-        };
+        let resolved = ProviderResolutionService::resolve_for_pane(&conn, &pane.id)
+            .expect("oauth account marked expired should still resolve for refresh");
 
-        assert_eq!(error.code, "expired_account");
-        assert_eq!(error.account_id.as_deref(), Some("expired-google"));
+        assert_eq!(resolved.credential.account_id, "expired-google");
         Ok(())
     }
 
     #[test]
-    fn expired_oauth_token_is_rejected() -> StorageResult<()> {
+    fn expired_api_key_account_status_is_rejected() -> StorageResult<()> {
+        let conn = rusqlite::Connection::open_in_memory()?;
+        conn.execute_batch(crate::storage::migrations::MIGRATIONS_FOR_TEST)?;
+        AccountRepository::insert_test_account(
+            &conn,
+            "expired-openai",
+            "openai",
+            "api_key",
+            "expired",
+            true,
+        )?;
+        let pane = create_bound_pane(&conn, "openai", Some("expired-openai"))?;
+
+        let error = match ProviderResolutionService::resolve_for_pane(&conn, &pane.id) {
+            Ok(_) => panic!("expired api_key account should not resolve"),
+            Err(error) => error,
+        };
+
+        assert_eq!(error.code, "expired_account");
+        assert_eq!(error.account_id.as_deref(), Some("expired-openai"));
+        Ok(())
+    }
+
+    #[test]
+    fn expired_oauth_token_allows_refresh_at_execution() -> StorageResult<()> {
         let conn = rusqlite::Connection::open_in_memory()?;
         conn.execute_batch(crate::storage::migrations::MIGRATIONS_FOR_TEST)?;
         AccountRepository::insert_test_account(
@@ -852,13 +895,11 @@ mod tests {
         set_token_expires_at(&conn, "past-google", "2000-01-01T00:00:00Z")?;
         let pane = create_bound_pane(&conn, "google", Some("past-google"))?;
 
-        let error = match ProviderResolutionService::resolve_for_pane(&conn, &pane.id) {
-            Ok(_) => panic!("expired OAuth token should not resolve"),
-            Err(error) => error,
-        };
+        let resolved = ProviderResolutionService::resolve_for_pane(&conn, &pane.id)
+            .expect("active oauth account with stale expiry should resolve for refresh");
 
-        assert_eq!(error.code, "expired_account");
-        assert_eq!(error.account_id.as_deref(), Some("past-google"));
+        assert_eq!(resolved.credential.account_id, "past-google");
+        assert_eq!(resolved.credential.auth_type, "oauth");
         Ok(())
     }
 

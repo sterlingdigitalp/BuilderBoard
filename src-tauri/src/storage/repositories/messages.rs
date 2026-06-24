@@ -125,6 +125,19 @@ impl MessageRepository {
     ) -> StorageResult<MessageDto> {
         let message = Self::get_by_id(connection, &request.message_id)?;
         Self::ensure_mutable_assistant(&message)?;
+        Self::append_stream_delta(connection, &request.message_id, &request.delta)?;
+        Self::get_by_id(connection, &request.message_id)
+    }
+
+    /// Hot-path stream append without pre-read or post-read round trips.
+    pub fn append_stream_delta(
+        connection: &Connection,
+        message_id: &str,
+        delta: &str,
+    ) -> StorageResult<()> {
+        if delta.is_empty() {
+            return Ok(());
+        }
 
         let now = Utc::now().to_rfc3339();
         let updated = connection.execute(
@@ -135,17 +148,16 @@ impl MessageRepository {
              WHERE id = ?3
                AND role = 'assistant'
                AND status IN ('pending', 'streaming')",
-            (&request.delta, &now, &request.message_id),
+            (delta, &now, message_id),
         )?;
 
         if updated == 0 {
             return Err(StorageError::InvalidInput(format!(
-                "message cannot accept stream update: {}",
-                request.message_id
+                "message cannot accept stream update: {message_id}"
             )));
         }
 
-        Self::get_by_id(connection, &request.message_id)
+        Ok(())
     }
 
     pub fn mark_complete(

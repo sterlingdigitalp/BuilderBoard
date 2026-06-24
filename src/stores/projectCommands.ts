@@ -1,13 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { ProjectDto } from "../types/projects";
-import {
-  readActiveWorkspaceId,
-  WORKSPACE_CHANGED_EVENT,
-  workspaceSwitch
-} from "./workspaceCommands";
+import { WORKSPACE_CHANGED_EVENT, workspaceSwitch } from "./workspaceCommands";
 
 export const PROJECT_CHANGED_EVENT = "builderboard:project-changed";
+
+const localActiveProjectKey = "builderboard.activeProjectId.v1";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -20,7 +18,7 @@ export function toProjectDto(value: unknown): ProjectDto {
 
   return {
     id: value.id,
-    workspaceId: typeof value.workspaceId === "string" ? value.workspaceId : value.id,
+    workspaceId: typeof value.workspaceId === "string" ? value.workspaceId : "",
     name: typeof value.name === "string" ? value.name : "Untitled project",
     code: typeof value.code === "string" ? value.code : "Pr",
     approvedRoot: typeof value.approvedRoot === "string" ? value.approvedRoot : "",
@@ -52,6 +50,7 @@ export async function projectCreateFromFolder(
     createInitialPane
   });
   const project = toProjectDto(response);
+  writeActiveProjectId(project.id);
   notifyProjectChanged();
   return project;
 }
@@ -59,6 +58,7 @@ export async function projectCreateFromFolder(
 export async function projectSwitch(projectId: string): Promise<ProjectDto> {
   const response = await invoke<unknown>("project_switch", { projectId });
   const project = toProjectDto(response);
+  writeActiveProjectId(project.id);
   await workspaceSwitch(project.workspaceId);
   notifyProjectChanged();
   return project;
@@ -79,5 +79,22 @@ export async function pickProjectFolder(): Promise<string | null> {
 }
 
 export function readActiveProjectId(): string {
-  return readActiveWorkspaceId();
+  try {
+    const stored = window.localStorage.getItem(localActiveProjectKey);
+    if (typeof stored === "string" && stored.length > 0) {
+      return stored;
+    }
+  } catch {
+    // Fall through to backend-derived state on next reload.
+  }
+
+  return "";
+}
+
+export function writeActiveProjectId(projectId: string): void {
+  try {
+    window.localStorage.setItem(localActiveProjectKey, projectId);
+  } catch {
+    // Persistence is best-effort; backend project_switch remains authoritative.
+  }
 }

@@ -3,9 +3,11 @@ use std::sync::{
     Arc,
 };
 
-use builderboard_lib::auth::CredentialService;
+use builderboard_lib::auth::{CredentialService, OAuthService};
+use builderboard_lib::project_scope_cache::ProjectScopeCache;
 use builderboard_lib::storage::commands::message_create_with_database;
 use builderboard_lib::stream_execution::stream_chat_with_services;
+use builderboard_lib::stream_persistence::StreamPersistenceService;
 use builderboard_lib::storage::db::Database;
 use builderboard_lib::storage::error::{StorageError, StorageResult};
 use builderboard_lib::storage::models::{CreatePaneRequest, MessageCreateRequest};
@@ -17,8 +19,10 @@ use tauri::Listener;
 #[test]
 #[ignore = "requires real BuilderBoard database account, macOS Keychain, and OpenAI network access"]
 fn live_ui_path_stream_chat_persists_and_emits_events() -> StorageResult<()> {
-    let database = Database::initialize_default()?;
+    let database = Arc::new(Database::initialize_default()?);
     let credentials = CredentialService::keychain();
+    let stream_persistence = Arc::new(StreamPersistenceService::new(Arc::clone(&database)));
+    let scope_cache = ProjectScopeCache::new();
 
     let app = tauri::test::mock_builder()
         .build(tauri::test::mock_context(tauri::test::noop_assets()))
@@ -66,7 +70,7 @@ fn live_ui_path_stream_chat_persists_and_emits_events() -> StorageResult<()> {
     })?;
 
     let turn = message_create_with_database(
-        &database,
+        database.as_ref(),
         MessageCreateRequest {
             pane_id: pane_id.clone(),
             content: "Hello from UI path validation".to_string(),
@@ -90,10 +94,14 @@ fn live_ui_path_stream_chat_persists_and_emits_events() -> StorageResult<()> {
     );
     println!("PHASE4B_UI_STREAM_CHAT=invoked");
 
+    let oauth = OAuthService::production();
     stream_chat_with_services(
         app.handle(),
-        &database,
+        database.as_ref(),
         &credentials,
+        &oauth,
+        &stream_persistence,
+        &scope_cache,
         &pane_id,
         "openai",
         &account_id,

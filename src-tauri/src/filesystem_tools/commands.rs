@@ -10,6 +10,7 @@ use crate::filesystem_tools::models::{
 };
 use crate::filesystem_tools::scope::ApprovedScope;
 use crate::filesystem_tools::service::FilesystemService;
+use crate::project_scope_cache::ProjectScopeCache;
 use crate::projects::repository::ProjectRepository;
 use crate::storage::db::Database;
 use crate::storage::error::{StorageError, StorageResult};
@@ -18,10 +19,14 @@ use crate::storage::repositories::workspaces::WorkspaceRepository;
 #[tauri::command]
 pub fn filesystem_set_approved_root(
     database: State<'_, Arc<Database>>,
+    scope_cache: State<'_, Arc<ProjectScopeCache>>,
     workspace_id: Option<String>,
     path: String,
 ) -> Result<String, String> {
-    filesystem_set_approved_root_with_database(database.inner(), workspace_id.as_deref(), &path)
+    let resolved =
+        filesystem_set_approved_root_with_database(database.inner(), workspace_id.as_deref(), &path)?;
+    scope_cache.invalidate_all();
+    Ok(resolved)
 }
 
 pub fn filesystem_set_approved_root_with_database(

@@ -2,9 +2,12 @@ use std::sync::Arc;
 
 use tauri::{AppHandle, Emitter, Runtime, State};
 
-use crate::auth::CredentialService;
+use crate::auth::{CredentialService, OAuthService};
 use crate::chat::{PaneExecutionContext, ProviderResolutionService};
+use crate::filesystem_intent::{FilesystemToolCall, route_filesystem_tools};
+use crate::project_scope_cache::ProjectScopeCache;
 use crate::stream_execution::{run_background_stream_chat, StreamChatJob};
+use crate::stream_persistence::StreamPersistenceService;
 use crate::projects::repository::ProjectRepository;
 use crate::filesystem_tools::perf::{trace_perf_metric, PerfSpan};
 use crate::runtime_diagnostics::{
@@ -121,12 +124,27 @@ pub fn pane_close(database: State<'_, Arc<Database>>, pane_id: String) -> Result
 #[tauri::command]
 pub fn pane_set_project(
     database: State<'_, Arc<Database>>,
+    scope_cache: State<'_, Arc<crate::project_scope_cache::ProjectScopeCache>>,
     pane_id: String,
     project_id: String,
 ) -> Result<PaneDto, String> {
-    database
+    let previous_project_id = database
+        .with_connection(|connection| {
+            Ok(PaneRepository::get_by_id(connection, &pane_id)
+                .ok()
+                .and_then(|pane| pane.project_id))
+        })
+        .map_err(format_storage_error)?;
+
+    let pane = database
         .with_connection(|connection| PaneRepository::set_project(connection, &pane_id, &project_id))
-        .map_err(format_storage_error)
+        .map_err(format_storage_error)?;
+
+    if let Some(previous_project_id) = previous_project_id {
+        scope_cache.invalidate_project(&previous_project_id);
+    }
+    scope_cache.invalidate_project(&project_id);
+    Ok(pane)
 }
 
 #[tauri::command]
@@ -253,6 +271,9 @@ pub async fn stream_chat(
     app: AppHandle,
     database: State<'_, Arc<Database>>,
     credentials: State<'_, Arc<CredentialService>>,
+    oauth: State<'_, Arc<OAuthService>>,
+    stream_persistence: State<'_, Arc<StreamPersistenceService>>,
+    scope_cache: State<'_, Arc<ProjectScopeCache>>,
     pane_id: String,
     provider_id: String,
     account_id: String,
@@ -288,6 +309,9 @@ pub async fn stream_chat(
         app.clone(),
         Arc::clone(database.inner()),
         Arc::clone(credentials.inner()),
+        Arc::clone(oauth.inner()),
+        Arc::clone(stream_persistence.inner()),
+        Arc::clone(scope_cache.inner()),
         job,
     ));
 
@@ -323,13 +347,14 @@ pub(crate) struct FilesystemEnrichmentPlan {
 
 pub(crate) fn prepare_stream_execution_db_only(
     connection: &rusqlite::Connection,
+    scope_cache: Option<&crate::project_scope_cache::ProjectScopeCache>,
     pane_id: &str,
     provider_id: &str,
     account_id: &str,
     model_id: &str,
     reasoning_level: Option<&str>,
 ) -> Result<PreparedStreamExecution, StorageError> {
-    let pane = PaneRepository::get_open_by_id(connection, pane_id)?;
+    let pane = PaneRepository::get_open_for_execution(connection, pane_id)?;
     let now = chrono::Utc::now().to_rfc3339();
     let metadata_json =
         pane_metadata_with_reasoning(pane.metadata_json.as_deref(), reasoning_level)?;
@@ -357,10 +382,19 @@ pub(crate) fn prepare_stream_execution_db_only(
         )));
     }
 
-    let execution_context =
-        ProviderResolutionService::load_execution_context(connection, pane_id).map_err(|error| {
-            StorageError::InvalidInput(format!("provider resolution error: {error:?}"))
-        })?;
+    let mut pane_for_resolution = pane.clone();
+    pane_for_resolution.provider_id = Some(provider_id.to_string());
+    pane_for_resolution.account_id = Some(account_id.to_string());
+    pane_for_resolution.model_id = Some(model_id.to_string());
+    pane_for_resolution.metadata_json = Some(metadata_json);
+
+    let execution_context = ProviderResolutionService::load_execution_context_from_pane(
+        connection,
+        &pane_for_resolution,
+    )
+    .map_err(|error| {
+        StorageError::InvalidInput(format!("provider resolution error: {error:?}"))
+    })?;
     let mut conversation = conversation_for_stream(connection, pane_id, model_id)?;
     let project_id = pane.project_id.as_deref().ok_or_else(|| {
         StorageError::InvalidInput(format!(
@@ -368,12 +402,33 @@ pub(crate) fn prepare_stream_execution_db_only(
         ))
     })?;
 
-    if let Some(lightweight_context) = lightweight_project_context(connection, project_id)? {
-        conversation =
-            conversation.with_message(Message::new(MessageRole::System, lightweight_context));
-    }
+    let cached_scope = if let Some(cache) = scope_cache {
+        cache.resolve(connection, project_id)?
+    } else {
+        let project = ProjectRepository::get_by_id(connection, project_id)?;
+        let scope = crate::filesystem_tools::ApprovedScope::new(project.approved_root.clone())
+            .map_err(|error| StorageError::InvalidInput(error.to_string()))?;
+        crate::project_scope_cache::CachedProjectScope {
+            project_id: project_id.to_string(),
+            project_name: project.name,
+            approved_root: project.approved_root,
+            scope,
+        }
+    };
 
-    let enrichment_plan = prepare_filesystem_enrichment(connection, project_id, &conversation)?;
+    conversation = conversation.with_message(Message::new(
+        MessageRole::System,
+        format!(
+            "Project: {}\nApproved root: {}\nFilesystem enrichment is running in the background before the model response begins.",
+            cached_scope.project_name, cached_scope.approved_root
+        ),
+    ));
+
+    let enrichment_plan = prepare_filesystem_enrichment_with_scope(
+        connection,
+        &cached_scope.scope,
+        &conversation,
+    )?;
 
     Ok(PreparedStreamExecution {
         execution_context,
@@ -412,6 +467,7 @@ pub(crate) fn enrich_conversation_with_filesystem(
         Ok(prompt) => {
             trace_perf_metric("PROMPT_INJECTION_SIZE", prompt.len());
             trace_filesystem_tool_loop(&format!("RESULT_SIZE={}", prompt.len()));
+            trace_filesystem_tool_loop(&format!("PROMPT_INJECTION_SIZE={}", prompt.len()));
             trace_filesystem_tool_loop("PROMPT_INJECTION=success");
             prompt
         }
@@ -427,31 +483,11 @@ pub(crate) fn enrich_conversation_with_filesystem(
         .with_message(Message::new(MessageRole::System, injected_prompt)))
 }
 
-fn lightweight_project_context(
-    connection: &rusqlite::Connection,
-    project_id: &str,
-) -> Result<Option<String>, StorageError> {
-    let project = ProjectRepository::get_by_id(connection, project_id)?;
-    let approved_root = ProjectRepository::get_approved_root(connection, project_id)?;
-    Ok(Some(format!(
-        "Project: {}\nApproved root: {}\nFilesystem enrichment is running in the background before the model response begins.",
-        project.name, approved_root
-    )))
-}
-
 pub(crate) fn prepare_filesystem_enrichment(
     connection: &rusqlite::Connection,
     project_id: &str,
     conversation: &Conversation,
 ) -> Result<Option<FilesystemEnrichmentPlan>, StorageError> {
-    let Some(prompt) = latest_user_prompt(&conversation) else {
-        return Ok(None);
-    };
-    let tool_calls = route_filesystem_tools(prompt);
-    if tool_calls.is_empty() {
-        return Ok(None);
-    }
-
     trace_project_root_lookup(connection, project_id);
     let scope = match ProjectRepository::load_scope(connection, project_id) {
         Ok(scope) => scope,
@@ -461,12 +497,27 @@ pub(crate) fn prepare_filesystem_enrichment(
             return Err(StorageError::InvalidInput(error.to_string()));
         }
     };
+    prepare_filesystem_enrichment_with_scope(connection, &scope, conversation)
+}
+
+pub(crate) fn prepare_filesystem_enrichment_with_scope(
+    _connection: &rusqlite::Connection,
+    scope: &crate::filesystem_tools::ApprovedScope,
+    conversation: &Conversation,
+) -> Result<Option<FilesystemEnrichmentPlan>, StorageError> {
+    let Some(prompt) = latest_user_prompt(conversation) else {
+        return Ok(None);
+    };
+    let routed = route_filesystem_tools(prompt);
+    if routed.tools.is_empty() {
+        return Ok(None);
+    }
 
     Ok(Some(FilesystemEnrichmentPlan {
         base_conversation: conversation.clone(),
-        scope,
+        scope: scope.clone(),
         prompt: prompt.to_string(),
-        tool_calls,
+        tool_calls: routed.tools,
     }))
 }
 
@@ -490,17 +541,26 @@ pub(crate) fn apply_stream_chunk<R: Runtime>(
         )?;
         emit_stream_complete(app, pane_id, assistant_message_id);
     } else if !chunk.content_delta.is_empty() {
-        MessageRepository::stream_update(
+        MessageRepository::append_stream_delta(
             connection,
-            MessageStreamUpdateRequest {
-                message_id: assistant_message_id.to_string(),
-                delta: chunk.content_delta.clone(),
-            },
+            assistant_message_id,
+            &chunk.content_delta,
         )?;
         emit_stream_chunk(app, pane_id, assistant_message_id, &chunk.content_delta);
     }
 
     Ok(())
+}
+
+pub(crate) fn flush_stream_delta(
+    connection: &rusqlite::Connection,
+    assistant_message_id: &str,
+    delta: &str,
+) -> Result<(), StorageError> {
+    if delta.is_empty() {
+        return Ok(());
+    }
+    MessageRepository::append_stream_delta(connection, assistant_message_id, delta)
 }
 
 pub(crate) fn conversation_for_stream(
@@ -514,12 +574,7 @@ pub(crate) fn conversation_for_stream(
         {
             continue;
         }
-        let role = match message.role.as_str() {
-            "system" => Some(MessageRole::System),
-            "user" => Some(MessageRole::User),
-            "assistant" => Some(MessageRole::Assistant),
-            _ => None,
-        };
+        let role = crate::models::message_role_from_db(&message.role);
         if let Some(role) = role {
             conversation = conversation.with_message(Message::new(role, message.content));
         }
@@ -548,25 +603,6 @@ fn latest_user_prompt(conversation: &Conversation) -> Option<&str> {
         .map(|message| message.content.as_str())
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub(crate) enum FilesystemToolCall {
-    ListDirectory { path: String },
-    ReadFile { path: String },
-    FindFiles { path: String, pattern: String },
-    SearchFiles { path: String, query: String },
-}
-
-impl FilesystemToolCall {
-    fn trace_tool_name(&self) -> &'static str {
-        match self {
-            FilesystemToolCall::ListDirectory { .. } => "list_directory",
-            FilesystemToolCall::ReadFile { .. } => "read_file",
-            FilesystemToolCall::FindFiles { .. } => "find_files",
-            FilesystemToolCall::SearchFiles { .. } => "search_files",
-        }
-    }
-}
-
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct FilesystemToolResult {
@@ -575,72 +611,15 @@ struct FilesystemToolResult {
     output: serde_json::Value,
 }
 
-fn route_filesystem_tools(prompt: &str) -> Vec<FilesystemToolCall> {
-    let lower = prompt.to_ascii_lowercase();
-    let mut calls = Vec::new();
-
-    if lower.contains("package.json") {
-        calls.push(FilesystemToolCall::ReadFile {
-            path: "package.json".to_string(),
-        });
-    }
-
-    if lower.contains("typescript") || lower.contains("*.ts") || lower.contains("ts files") {
-        calls.push(FilesystemToolCall::FindFiles {
-            path: ".".to_string(),
-            pattern: "*.ts".to_string(),
-        });
-    }
-
-    if lower.contains("oauth") {
-        calls.push(FilesystemToolCall::SearchFiles {
-            path: ".".to_string(),
-            query: "OAuth".to_string(),
-        });
-    }
-
-    if (lower.starts_with("review ") && !lower.contains("package.json"))
-        || lower.contains("project structure")
-        || lower.contains("review the project")
-        || lower.contains("review this project")
-        || lower.contains("take a look")
-        || lower.contains("look at")
-    {
-        calls.insert(
-            0,
-            FilesystemToolCall::ListDirectory {
-                path: ".".to_string(),
-            },
-        );
-        for path in ["package.json", "README.md", "readme.md"] {
-            if !calls.iter().any(|call| {
-                matches!(call, FilesystemToolCall::ReadFile { path: existing } if existing == path)
-            }) {
-                calls.push(FilesystemToolCall::ReadFile {
-                    path: path.to_string(),
-                });
-            }
-        }
-        if lower.contains("architecture") || lower.contains("project structure") {
-            if !calls.iter().any(|call| {
-                matches!(call, FilesystemToolCall::ListDirectory { path } if path == "src")
-            }) {
-                calls.push(FilesystemToolCall::ListDirectory {
-                    path: "src".to_string(),
-                });
-            }
-        }
-    }
-
-    calls
-}
-
 fn execute_filesystem_tool_calls(
     scope: &crate::filesystem_tools::ApprovedScope,
     prompt: &str,
     calls: &[FilesystemToolCall],
 ) -> Result<Vec<FilesystemToolResult>, StorageError> {
     let mut results = Vec::new();
+    let mut shared_scan_context = ScanContext::for_tool(prompt, ".");
+    let mut read_cache: std::collections::HashMap<String, crate::filesystem_tools::models::ReadFileResult> =
+        std::collections::HashMap::new();
     for call in calls {
         trace_filesystem_tool_loop(&format!("TOOL={}", call.trace_tool_name()));
         match call {
@@ -662,7 +641,15 @@ fn execute_filesystem_tool_calls(
                 });
             }
             FilesystemToolCall::ReadFile { path } => {
-                match FilesystemService::read_file(scope, path) {
+                let output = if let Some(cached) = read_cache.get(path) {
+                    Ok(cached.clone())
+                } else {
+                    FilesystemService::read_file(scope, path).map(|output| {
+                        read_cache.insert(path.clone(), output.clone());
+                        output
+                    })
+                };
+                match output {
                     Ok(output) => {
                         trace_filesystem_tool_loop("TOOL_SUCCESS=true");
                         results.push(FilesystemToolResult {
@@ -687,12 +674,11 @@ fn execute_filesystem_tool_calls(
                 }
             }
             FilesystemToolCall::FindFiles { path, pattern } => {
-                let mut scan_context = ScanContext::for_tool(prompt, path);
                 let output = match FilesystemService::find_files_with_context(
                     scope,
                     path,
                     pattern,
-                    &mut scan_context,
+                    &mut shared_scan_context,
                 ) {
                     Ok(output) => {
                         trace_filesystem_tool_loop("TOOL_SUCCESS=true");
@@ -710,12 +696,11 @@ fn execute_filesystem_tool_calls(
                 });
             }
             FilesystemToolCall::SearchFiles { path, query } => {
-                let mut scan_context = ScanContext::for_tool(prompt, path);
                 let output = match FilesystemService::search_files_with_context(
                     scope,
                     path,
                     query,
-                    &mut scan_context,
+                    &mut shared_scan_context,
                 ) {
                     Ok(output) => {
                         trace_filesystem_tool_loop("TOOL_SUCCESS=true");
@@ -1091,16 +1076,20 @@ mod tests {
         account_create_api_key_with_service, account_disconnect_with_service,
         account_list_from_database, conversation_with_filesystem_tool_results, model_from_id,
         pane_metadata_with_reasoning, prepare_filesystem_enrichment,
-        provider_list_from_database, route_filesystem_tools, run_filesystem_enrichment_async,
-        FilesystemToolCall,
+        prepare_stream_execution_db_only, provider_list_from_database,
+        run_filesystem_enrichment_async,
     };
+    use crate::filesystem_intent::{route_filesystem_tools, FilesystemToolCall};
     use crate::auth::CredentialService;
     use crate::filesystem_tools::approved_root::set_approved_root;
     use crate::models::Model;
     use crate::models::{Conversation, Message, MessageRole};
     use crate::storage::db::{test_database_path, Database};
     use crate::storage::error::StorageResult;
+    use crate::storage::models::{CreatePaneRequest, MessageCreateRequest};
     use crate::storage::repositories::accounts::AccountRepository;
+    use crate::storage::repositories::messages::MessageRepository;
+    use crate::storage::repositories::panes::PaneRepository;
 
     #[test]
     fn provider_list_returns_seeded_providers() -> StorageResult<()> {
@@ -1228,28 +1217,52 @@ mod tests {
     #[test]
     fn filesystem_tool_router_matches_validation_scenarios() {
         assert!(matches!(
-            route_filesystem_tools("Review the project structure.").first(),
+            route_filesystem_tools("Review the project structure.")
+                .tools
+                .first(),
             Some(FilesystemToolCall::ListDirectory { path }) if path == "."
         ));
+        assert!(route_filesystem_tools("Review /Users/sterlingdigital/PepFox")
+            .tools
+            .iter()
+            .any(|call| {
+                matches!(call, FilesystemToolCall::ListDirectory { path } if path == ".")
+            }));
         assert!(matches!(
-            route_filesystem_tools("Review /Users/sterlingdigital/PepFox").first(),
-            Some(FilesystemToolCall::ListDirectory { path }) if path == "."
-        ));
-        assert!(matches!(
-            route_filesystem_tools("Take a look at PepFox").first(),
+            route_filesystem_tools("Take a look at PepFox")
+                .tools
+                .first(),
             Some(FilesystemToolCall::ListDirectory { path }) if path == "."
         ));
         assert!(route_filesystem_tools("Review package.json.")
+            .tools
             .iter()
             .any(|call| {
                 matches!(call, FilesystemToolCall::ReadFile { path } if path == "package.json")
             }));
-        assert!(route_filesystem_tools("Find OAuth code.").iter().any(|call| {
-            matches!(call, FilesystemToolCall::SearchFiles { path, query } if path == "." && query == "OAuth")
-        }));
-        assert!(route_filesystem_tools("Find all TypeScript files.").iter().any(|call| {
-            matches!(call, FilesystemToolCall::FindFiles { path, pattern } if path == "." && pattern == "*.ts")
-        }));
+        assert!(route_filesystem_tools("Find OAuth code.")
+            .tools
+            .iter()
+            .any(|call| {
+                matches!(call, FilesystemToolCall::SearchFiles { path, query } if path == "." && query == "OAuth")
+            }));
+        assert!(route_filesystem_tools("Find all TypeScript files.")
+            .tools
+            .iter()
+            .any(|call| {
+                matches!(call, FilesystemToolCall::FindFiles { path, pattern } if path == "." && pattern == "*.ts")
+            }));
+        assert!(!route_filesystem_tools("Perform a production readiness review")
+            .tools
+            .is_empty());
+        assert!(route_filesystem_tools("Find security concerns")
+            .tools
+            .iter()
+            .any(|call| matches!(call, FilesystemToolCall::SearchFiles { .. })));
+        assert!(route_filesystem_tools("Identify technical debt")
+            .tools
+            .iter()
+            .any(|call| matches!(call, FilesystemToolCall::FindFiles { .. })));
     }
 
     #[test]
@@ -1442,6 +1455,60 @@ mod tests {
         let status = database
             .with_connection(|connection| AccountRepository::get_status(connection, &account.id))?;
         assert_eq!(status.status, "revoked");
+        Ok(())
+    }
+
+    #[test]
+    fn stream_prepare_builds_enrichment_plan_in_one_pass() -> StorageResult<()> {
+        let (database, project_id) =
+            setup_filesystem_root(&format!("stream-prepare-{}.db", uuid::Uuid::new_v4()))?;
+        let account = database.with_connection(|connection| {
+            AccountRepository::insert_test_account(
+                connection,
+                "prepare-openai",
+                "openai",
+                "api_key",
+                "active",
+                true,
+            )?;
+            Ok("prepare-openai".to_string())
+        })?;
+        let pane_id = database.with_connection(|connection| {
+            let pane = PaneRepository::create(
+                connection,
+                CreatePaneRequest {
+                    workspace_id: None,
+                    project_id: Some(project_id),
+                    title: Some("Prepare pane".to_string()),
+                    sort_order: None,
+                },
+            )?;
+            MessageRepository::create_conversation_turn(
+                connection,
+                MessageCreateRequest {
+                    pane_id: pane.id.clone(),
+                    content: "Run a security review of this project".to_string(),
+                    content_type: Some("text".to_string()),
+                    metadata_json: None,
+                },
+            )?;
+            Ok(pane.id)
+        })?;
+
+        let prepared = database.with_connection(|connection| {
+            prepare_stream_execution_db_only(
+                connection,
+                None,
+                &pane_id,
+                "openai",
+                &account,
+                "OpenAIGpt",
+                Some("medium"),
+            )
+        })?;
+
+        assert!(prepared.enrichment_plan.is_some());
+        assert_eq!(prepared.execution_context.credential.account_id, account);
         Ok(())
     }
 }

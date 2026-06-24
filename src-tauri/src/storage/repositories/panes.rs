@@ -156,8 +156,15 @@ impl PaneRepository {
     }
 
     pub fn get_open_by_id(connection: &Connection, pane_id: &str) -> StorageResult<PaneDto> {
+        let mut pane = Self::get_open_for_execution(connection, pane_id)?;
+        enrich_header_display(connection, &mut pane)?;
+        Ok(pane)
+    }
+
+    /// Hot-path pane fetch for stream execution. Skips header display enrichment queries.
+    pub fn get_open_for_execution(connection: &Connection, pane_id: &str) -> StorageResult<PaneDto> {
         let sql = format!("{PANE_SELECT} FROM panes WHERE id = ?1 AND closed_at IS NULL");
-        let mut pane = connection
+        let pane = connection
             .query_row(&sql, [pane_id], map_pane_row)
             .optional()?
             .ok_or_else(|| StorageError::NotFound(format!("open pane {pane_id} not found")))?;
@@ -166,7 +173,6 @@ impl PaneRepository {
                 "open pane {pane_id} is missing project_id"
             )));
         }
-        enrich_header_display(connection, &mut pane)?;
         Ok(pane)
     }
 }

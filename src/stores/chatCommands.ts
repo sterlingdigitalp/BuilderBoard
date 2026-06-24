@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { isTauriRuntime } from "./tauriRuntime";
 import type {
   MessageCreateInput,
   MessageCreateResult,
@@ -183,8 +184,11 @@ export async function messageList(paneId: string): Promise<MessageDto[]> {
   try {
     const response = await invoke<unknown[]>("message_list", { paneId });
     return response.map(toMessageDto);
-  } catch {
-    return localMessagesForPane(paneId);
+  } catch (error) {
+    if (!isTauriRuntime()) {
+      return localMessagesForPane(paneId);
+    }
+    throw error;
   }
 }
 
@@ -197,17 +201,20 @@ export async function messageCreate(input: MessageCreateInput): Promise<MessageC
       metadataJson: input.metadataJson ?? "{}"
     });
     return toMessageCreateResult(response);
-  } catch {
-    const state = readLocalMessages();
-    const messages = state[input.paneId] ?? [];
-    const userMessage = createLocalMessage(input.paneId, "user", input.content, "complete", null);
-    const assistantMessage = createLocalMessage(input.paneId, "assistant", "", "pending", userMessage.id);
+  } catch (error) {
+    if (!isTauriRuntime()) {
+      const state = readLocalMessages();
+      const messages = state[input.paneId] ?? [];
+      const userMessage = createLocalMessage(input.paneId, "user", input.content, "complete", null);
+      const assistantMessage = createLocalMessage(input.paneId, "assistant", "", "pending", userMessage.id);
 
-    writeLocalMessages({
-      ...state,
-      [input.paneId]: [...messages, userMessage, assistantMessage]
-    });
-    return { userMessage, assistantMessage };
+      writeLocalMessages({
+        ...state,
+        [input.paneId]: [...messages, userMessage, assistantMessage]
+      });
+      return { userMessage, assistantMessage };
+    }
+    throw error;
   }
 }
 

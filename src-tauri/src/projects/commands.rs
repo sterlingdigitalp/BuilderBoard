@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use tauri::State;
 
+use crate::project_scope_cache::ProjectScopeCache;
 use crate::projects::repository::{ProjectDto, ProjectRepository};
 use crate::storage::db::Database;
 
@@ -30,14 +31,17 @@ pub fn project_get_active_from_database(database: &Database) -> Result<Option<Pr
 #[tauri::command]
 pub fn project_create_from_folder(
     database: State<'_, Arc<Database>>,
+    scope_cache: State<'_, Arc<ProjectScopeCache>>,
     folder_path: String,
     create_initial_pane: Option<bool>,
 ) -> Result<ProjectDto, String> {
-    project_create_from_folder_with_database(
+    let project = project_create_from_folder_with_database(
         database.inner(),
         &folder_path,
         create_initial_pane,
-    )
+    )?;
+    scope_cache.invalidate_all();
+    Ok(project)
 }
 
 pub fn project_create_from_folder_with_database(
@@ -56,9 +60,12 @@ pub fn project_create_from_folder_with_database(
 #[tauri::command]
 pub fn project_switch(
     database: State<'_, Arc<Database>>,
+    scope_cache: State<'_, Arc<ProjectScopeCache>>,
     project_id: String,
 ) -> Result<ProjectDto, String> {
-    project_switch_with_database(database.inner(), &project_id)
+    let project = project_switch_with_database(database.inner(), &project_id)?;
+    scope_cache.invalidate_project(&project_id);
+    Ok(project)
 }
 
 pub fn project_switch_with_database(

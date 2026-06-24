@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   PROJECT_CHANGED_EVENT,
+  projectGetActive,
   projectList,
-  readActiveProjectId
+  readActiveProjectId,
+  writeActiveProjectId
 } from "../stores/projectCommands";
 import type { ProjectDto } from "../types/projects";
 
@@ -42,17 +44,28 @@ export function useProjects(): ProjectState {
     setError(null);
 
     try {
-      const loadedProjects = await projectList();
-      const nextActiveProjectId = readActiveProjectId();
+      const [loadedProjects, activeProject] = await Promise.all([
+        projectList(),
+        projectGetActive()
+      ]);
+      const storedActiveProjectId = readActiveProjectId();
+      const backendActiveProjectId = activeProject?.id ?? "";
+      const preferredActiveProjectId =
+        backendActiveProjectId.length > 0 ? backendActiveProjectId : storedActiveProjectId;
 
       setProjects(loadedProjects);
-      setActiveProjectId(
-        loadedProjects.some((project) => project.id === nextActiveProjectId)
-          ? nextActiveProjectId
-          : loadedProjects.find((project) => project.isActive)?.id ??
-              loadedProjects[0]?.id ??
-              nextActiveProjectId
-      );
+      const resolvedActiveProjectId = loadedProjects.some(
+        (project) => project.id === preferredActiveProjectId
+      )
+        ? preferredActiveProjectId
+        : loadedProjects.find((project) => project.isActive)?.id ??
+            loadedProjects[0]?.id ??
+            "";
+
+      setActiveProjectId(resolvedActiveProjectId);
+      if (resolvedActiveProjectId.length > 0) {
+        writeActiveProjectId(resolvedActiveProjectId);
+      }
     } catch (loadError) {
       setError(errorMessage(loadError));
     } finally {
@@ -64,6 +77,7 @@ export function useProjects(): ProjectState {
 
   const setLauncherProject = useCallback((projectId: string) => {
     setActiveProjectId(projectId);
+    writeActiveProjectId(projectId);
   }, []);
 
   useEffect(() => {

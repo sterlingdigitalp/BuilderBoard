@@ -13,6 +13,8 @@ use std::sync::Arc;
 use tauri::Manager;
 
 use crate::auth::{CredentialService, OAuthService};
+use crate::project_scope_cache::ProjectScopeCache;
+use crate::stream_persistence::StreamPersistenceService;
 
 use db::Database;
 
@@ -28,9 +30,13 @@ pub fn run() -> tauri::Result<()> {
             })?);
             let credentials = Arc::new(CredentialService::keychain());
             let oauth = Arc::new(OAuthService::production());
+            let stream_persistence = Arc::new(StreamPersistenceService::new(Arc::clone(&database)));
+            let project_scope_cache = Arc::new(ProjectScopeCache::new());
             app.manage(database);
             app.manage(credentials);
             app.manage(oauth);
+            app.manage(stream_persistence);
+            app.manage(project_scope_cache);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

@@ -366,6 +366,10 @@ impl OpenAIProvider {
                     "role": "assistant",
                     "content": [{ "type": "output_text", "text": message.content }],
                 })),
+                MessageRole::Tool => instructions.push(format!(
+                    "Tool result:\n{}",
+                    message.content
+                )),
             }
         }
 
@@ -1069,6 +1073,7 @@ fn openai_role(role: &MessageRole) -> &'static str {
         MessageRole::System => "system",
         MessageRole::User => "user",
         MessageRole::Assistant => "assistant",
+        MessageRole::Tool => "tool",
     }
 }
 

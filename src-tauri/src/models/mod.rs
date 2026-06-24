@@ -28,6 +28,17 @@ pub enum MessageRole {
     System,
     User,
     Assistant,
+    Tool,
+}
+
+pub fn message_role_from_db(role: &str) -> Option<MessageRole> {
+    match role {
+        "system" => Some(MessageRole::System),
+        "user" => Some(MessageRole::User),
+        "assistant" => Some(MessageRole::Assistant),
+        "tool" => Some(MessageRole::Tool),
+        _ => None,
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -63,5 +74,13 @@ mod tests {
 
         assert_eq!(conversation.messages.len(), 1);
         assert_eq!(conversation.messages[0].content, "Hello");
+    }
+
+    #[test]
+    fn message_role_from_db_includes_tool() {
+        assert_eq!(
+            super::message_role_from_db("tool"),
+            Some(MessageRole::Tool)
+        );
     }
 }

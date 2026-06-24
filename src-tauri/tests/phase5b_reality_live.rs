@@ -1,11 +1,14 @@
 use std::fs;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use builderboard_lib::auth::oauth_service::resolve_openai_credentials;
-use builderboard_lib::auth::CredentialService;
+use builderboard_lib::auth::{CredentialService, OAuthService};
+use builderboard_lib::project_scope_cache::ProjectScopeCache;
 use builderboard_lib::projects::repository::ProjectRepository;
 use builderboard_lib::storage::commands::message_create_with_database;
 use builderboard_lib::stream_execution::stream_chat_with_services;
+use builderboard_lib::stream_persistence::StreamPersistenceService;
 use builderboard_lib::storage::db::Database;
 use builderboard_lib::storage::error::StorageResult;
 use builderboard_lib::storage::models::{CreatePaneRequest, MessageCreateRequest};
@@ -45,8 +48,10 @@ fn live_openai_oauth_uses_bundled_chatgpt_client_without_env() {
 #[test]
 #[ignore = "requires real BuilderBoard OpenAI API-key account and macOS Keychain access"]
 fn live_model_and_reasoning_persist_on_stream_chat() -> StorageResult<()> {
-    let database = Database::initialize_default()?;
+    let database = Arc::new(Database::initialize_default()?);
     let credentials = CredentialService::keychain();
+    let stream_persistence = Arc::new(StreamPersistenceService::new(Arc::clone(&database)));
+    let scope_cache = ProjectScopeCache::new();
 
     let account_id = database.with_connection(|connection| {
         let account = AccountRepository::list_active(connection, Some("openai"))?
@@ -102,8 +107,11 @@ fn live_model_and_reasoning_persist_on_stream_chat() -> StorageResult<()> {
 
         stream_chat_with_services(
             app.handle(),
-            &database,
+            database.as_ref(),
             &credentials,
+            &OAuthService::production(),
+            &stream_persistence,
+            &scope_cache,
             &pane_id,
             "openai",
             &account_id,
@@ -155,8 +163,10 @@ fn final_openai_oauth_execution_trace_hello() -> StorageResult<()> {
     std::env::set_var("BUILDERBOARD_TRACE_OPENAI_EXECUTION", "1");
 
     let result = (|| -> StorageResult<()> {
-        let database = Database::initialize_default()?;
+        let database = Arc::new(Database::initialize_default()?);
         let credentials = CredentialService::keychain();
+        let stream_persistence = Arc::new(StreamPersistenceService::new(Arc::clone(&database)));
+        let scope_cache = ProjectScopeCache::new();
         let model_id = "gpt-5.3-codex-spark";
 
         let account_id = database.with_connection(|connection| {
@@ -197,7 +207,7 @@ fn final_openai_oauth_execution_trace_hello() -> StorageResult<()> {
         })?;
 
         let turn = message_create_with_database(
-            &database,
+            database.as_ref(),
             MessageCreateRequest {
                 pane_id: pane_id.clone(),
                 content: "Hello".to_string(),
@@ -218,8 +228,11 @@ fn final_openai_oauth_execution_trace_hello() -> StorageResult<()> {
 
         stream_chat_with_services(
             app.handle(),
-            &database,
+            database.as_ref(),
             &credentials,
+            &OAuthService::production(),
+            &stream_persistence,
+            &scope_cache,
             &pane_id,
             "openai",
             &account_id,
@@ -255,8 +268,10 @@ fn live_filesystem_tool_loop_trace_pepfox() -> StorageResult<()> {
     std::env::set_var("BUILDERBOARD_TRACE_OPENAI_EXECUTION", "1");
 
     let result = (|| -> StorageResult<()> {
-        let database = Database::initialize_default()?;
+        let database = Arc::new(Database::initialize_default()?);
         let credentials = CredentialService::keychain();
+        let stream_persistence = Arc::new(StreamPersistenceService::new(Arc::clone(&database)));
+        let scope_cache = ProjectScopeCache::new();
         let model_id = "gpt-5.3-codex-spark";
 
         let account_id = database.with_connection(|connection| {
@@ -306,7 +321,7 @@ fn live_filesystem_tool_loop_trace_pepfox() -> StorageResult<()> {
 
         let prompt = "take a look at /Users/sterlingdigital/PepFox";
         let turn = message_create_with_database(
-            &database,
+            database.as_ref(),
             MessageCreateRequest {
                 pane_id: pane_id.clone(),
                 content: prompt.to_string(),
@@ -331,8 +346,11 @@ fn live_filesystem_tool_loop_trace_pepfox() -> StorageResult<()> {
 
         stream_chat_with_services(
             app.handle(),
-            &database,
+            database.as_ref(),
             &credentials,
+            &OAuthService::production(),
+            &stream_persistence,
+            &scope_cache,
             &pane_id,
             "openai",
             &account_id,

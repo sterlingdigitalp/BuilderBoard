@@ -2,19 +2,20 @@ use std::sync::Arc;
 
 use tauri::{AppHandle, Runtime};
 
-use crate::auth::CredentialService;
+use crate::auth::{CredentialService, OAuthService};
 use crate::chat::ProviderResolutionService;
 use crate::filesystem_tools::perf::{trace_perf_metric, PerfSpan};
+use crate::project_scope_cache::ProjectScopeCache;
 use crate::providers::{ProviderError, ProviderRequest, ProviderResolutionError};
 use crate::runtime_diagnostics::trace_runtime_phase;
 use crate::storage::commands::{
-    apply_stream_chunk, emit_stream_complete, emit_stream_enrichment_started, emit_stream_error,
-    enrich_conversation_with_filesystem, prepare_stream_execution_db_only,
+    emit_stream_enrichment_started, emit_stream_error, enrich_conversation_with_filesystem,
+    prepare_stream_execution_db_only,
 };
 use crate::storage::db::Database;
 use crate::storage::error::StorageError;
-use crate::storage::models::{MessageCompleteRequest, MessageErrorRequest};
-use crate::storage::repositories::messages::MessageRepository;
+use crate::stream_persistence::StreamPersistenceService;
+use crate::stream_write_buffer::StreamWriteBuffer;
 
 #[derive(Clone, Debug)]
 pub struct StreamChatJob {
@@ -30,20 +31,30 @@ pub async fn run_background_stream_chat<R: Runtime>(
     app: AppHandle<R>,
     database: Arc<Database>,
     credentials: Arc<CredentialService>,
+    oauth: Arc<OAuthService>,
+    stream_persistence: Arc<StreamPersistenceService>,
+    scope_cache: Arc<ProjectScopeCache>,
     job: StreamChatJob,
 ) {
-    if let Err(error) = run_background_stream_chat_inner(&app, &database, &credentials, &job).await {
+    if let Err(error) = run_background_stream_chat_inner(
+        &app,
+        &database,
+        &credentials,
+        &oauth,
+        &stream_persistence,
+        &scope_cache,
+        &job,
+    )
+    .await
+    {
         let message = error.to_string();
-        let _ = database.with_connection(|connection| {
-            MessageRepository::mark_error(
-                connection,
-                MessageErrorRequest {
-                    message_id: job.assistant_message_id.clone(),
-                    error_code: "provider_execution_failed".to_string(),
-                    error_message: message.clone(),
-                },
-            )
-        });
+        let _ = stream_persistence.enqueue_error(
+            &job.pane_id,
+            &job.assistant_message_id,
+            "provider_execution_failed",
+            message.clone(),
+        );
+        let _ = stream_persistence.drain_message(&job.assistant_message_id).await;
         emit_stream_error(
             &app,
             &job.pane_id,
@@ -58,6 +69,9 @@ pub async fn run_background_stream_chat_inner<R: Runtime>(
     app: &AppHandle<R>,
     database: &Database,
     credentials: &CredentialService,
+    oauth: &OAuthService,
+    stream_persistence: &Arc<StreamPersistenceService>,
+    scope_cache: &ProjectScopeCache,
     job: &StreamChatJob,
 ) -> Result<(), StorageError> {
     let total_span = PerfSpan::start("TOTAL_REQUEST_DURATION_MS");
@@ -67,6 +81,7 @@ pub async fn run_background_stream_chat_inner<R: Runtime>(
     let prepared = database.with_connection_labeled("stream_chat_prepare", |connection| {
         prepare_stream_execution_db_only(
             connection,
+            Some(scope_cache),
             &job.pane_id,
             &job.provider_id,
             &job.account_id,
@@ -75,6 +90,16 @@ pub async fn run_background_stream_chat_inner<R: Runtime>(
         )
     })?;
     trace_runtime_phase("stream_chat_prepare", "complete");
+
+    if prepared.execution_context.credential.auth_type == "oauth" {
+        ProviderResolutionService::refresh_oauth_access_token_if_needed(
+            database,
+            credentials,
+            oauth,
+            &prepared.execution_context,
+        )
+        .map_err(map_provider_resolution_error)?;
+    }
 
     let openai_provider = ProviderResolutionService::resolve_openai_provider(
         prepared.execution_context,
@@ -109,11 +134,14 @@ pub async fn run_background_stream_chat_inner<R: Runtime>(
     let request = ProviderRequest::new(conversation)
         .with_reasoning_level(job.reasoning_level.clone());
 
-    let pane_id = job.pane_id.clone();
-    let assistant_message_id = job.assistant_message_id.clone();
     let mut openai_started = false;
+    let mut write_buffer = StreamWriteBuffer::new(
+        Arc::clone(stream_persistence),
+        job.pane_id.clone(),
+        job.assistant_message_id.clone(),
+    );
 
-    openai_provider
+    let stream_result = openai_provider
         .stream_chunks_async(request, |chunk| {
             if !openai_started {
                 trace_perf_metric("OPENAI_REQUEST_DURATION_MS", openai_span.elapsed_ms());
@@ -121,51 +149,36 @@ pub async fn run_background_stream_chat_inner<R: Runtime>(
             }
 
             match chunk {
-                Ok(chunk) => database
-                    .with_connection_labeled("stream_chat_chunk", |connection| {
-                        apply_stream_chunk(app, connection, &pane_id, &assistant_message_id, chunk)
-                    })
-                    .map_err(|error| ProviderError::InvalidResponse {
-                        message: error.to_string(),
-                    }),
-                Err(error) => {
-                    let message = format!("{error:?}");
-                    let _ = database.with_connection(|connection| {
-                        MessageRepository::mark_error(
-                            connection,
-                            MessageErrorRequest {
-                                message_id: assistant_message_id.clone(),
-                                error_code: "provider_error".to_string(),
-                                error_message: message.clone(),
-                            },
-                        )
-                    });
-                    Err(error)
+                Ok(chunk) => {
+                    if chunk.is_complete {
+                        return Ok(());
+                    }
+                    write_buffer
+                        .push(app, &chunk.content_delta)
+                        .map_err(|error| ProviderError::InvalidResponse {
+                            message: error.to_string(),
+                        })
                 }
+                Err(error) => Err(error),
             }
         })
-        .await
-        .map_err(|error| StorageError::InvalidInput(format!("provider stream error: {error:?}")))?;
+        .await;
+
+    if let Err(error) = stream_result {
+        let message = format!("{error:?}");
+        stream_persistence.enqueue_error(
+            &job.pane_id,
+            &job.assistant_message_id,
+            "provider_error",
+            message,
+        )?;
+        stream_persistence.drain_message(&job.assistant_message_id).await?;
+        return Err(StorageError::InvalidInput(format!("provider stream error: {error:?}")));
+    }
+
+    write_buffer.finish_with_complete(app).await?;
 
     trace_runtime_phase("openai_stream", "complete");
-
-    database.with_connection_labeled("stream_chat_complete", |connection| {
-        let latest = MessageRepository::get_by_id(connection, &job.assistant_message_id)?;
-        if latest.status != "complete" {
-            MessageRepository::mark_complete(
-                connection,
-                MessageCompleteRequest {
-                    message_id: job.assistant_message_id.clone(),
-                    content: None,
-                    token_count_input: None,
-                    token_count_output: None,
-                    metadata_json: None,
-                },
-            )?;
-            emit_stream_complete(app, &job.pane_id, &job.assistant_message_id);
-        }
-        Ok(())
-    })?;
 
     if !openai_started {
         openai_span.finish();
@@ -184,6 +197,9 @@ pub fn stream_chat_with_services<R: Runtime>(
     app: &AppHandle<R>,
     database: &Database,
     credentials: &CredentialService,
+    oauth: &OAuthService,
+    stream_persistence: &Arc<StreamPersistenceService>,
+    scope_cache: &ProjectScopeCache,
     pane_id: &str,
     provider_id: &str,
     account_id: &str,
@@ -204,6 +220,9 @@ pub fn stream_chat_with_services<R: Runtime>(
         app,
         database,
         credentials,
+        oauth,
+        stream_persistence,
+        scope_cache,
         &job,
     ))
 }

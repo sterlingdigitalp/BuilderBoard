@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { PaneDto, PaneStatus } from "../types/layout";
+import { isTauriRuntime } from "./tauriRuntime";
 import { DEFAULT_WORKSPACE_ID } from "./workspaceCommands";
 
 const paneStatuses: PaneStatus[] = ["idle", "streaming", "error"];
@@ -123,11 +124,12 @@ export async function paneList(workspaceId?: string): Promise<PaneDto[]> {
     const response = await invoke<unknown[]>("pane_list", {
       workspaceId: DEFAULT_WORKSPACE_ID
     });
-    return [...response.map(toPaneDto), ...localPaneList(resolvedWorkspaceId)].sort(
-      (a, b) => a.sortOrder - b.sortOrder
-    );
-  } catch {
-    return localPaneList(resolvedWorkspaceId);
+    return response.map(toPaneDto).sort((a, b) => a.sortOrder - b.sortOrder);
+  } catch (error) {
+    if (!isTauriRuntime()) {
+      return localPaneList(resolvedWorkspaceId);
+    }
+    throw error;
   }
 }
 
@@ -143,8 +145,11 @@ export async function paneCreate(
       projectId
     });
     return response === null || response === undefined ? null : toPaneDto(response);
-  } catch {
-    return createLocalPane(resolvedWorkspaceId);
+  } catch (error) {
+    if (!isTauriRuntime()) {
+      return createLocalPane(resolvedWorkspaceId);
+    }
+    throw error;
   }
 }
 

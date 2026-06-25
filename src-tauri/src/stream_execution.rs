@@ -5,7 +5,7 @@ use tokio::sync::mpsc;
 
 use crate::auth::{CredentialService, OAuthService};
 use crate::chat::ProviderResolutionService;
-use crate::execution::{global_engine_registry, ExecutionContext, ExecutionEvent, ExecutionRequest};
+use crate::execution::{global_engine_registry, ExecutionContext, ExecutionEvent, ExecutionManager, ExecutionRequest};
 use crate::filesystem_tools::perf::{trace_perf_metric, PerfSpan};
 use crate::project_scope_cache::ProjectScopeCache;
 use crate::providers::{ProviderError, ProviderResolutionError};
@@ -23,6 +23,7 @@ use crate::stream_write_buffer::StreamWriteBuffer;
 pub struct StreamChatJob {
     pub pane_id: String,
     pub provider_id: String,
+    pub builder_id: Option<String>,
     pub account_id: String,
     pub model_id: String,
     pub assistant_message_id: String,
@@ -42,6 +43,7 @@ pub async fn run_background_stream_chat<R: Runtime>(
         &app,
         &database,
         &credentials,
+        Some(Arc::clone(&credentials)),
         &oauth,
         &stream_persistence,
         &scope_cache,
@@ -71,6 +73,7 @@ pub async fn run_background_stream_chat_inner<R: Runtime>(
     app: &AppHandle<R>,
     database: &Database,
     credentials: &CredentialService,
+    credential_service: Option<Arc<CredentialService>>,
     oauth: &OAuthService,
     stream_persistence: &Arc<StreamPersistenceService>,
     scope_cache: &ProjectScopeCache,
@@ -124,60 +127,27 @@ pub async fn run_background_stream_chat_inner<R: Runtime>(
         prepared.conversation
     };
 
-    // Route ALL execution through the (now generalized) ExecutionEngine abstraction.
-    // The abstraction is execution-centric. OpenAI remains the only engine for now
-    // and produces exactly the same deltas, metrics, and side-effects as before.
-    // Phase 8.9E: Intelligent routing via ExecutionManager when a Builder is indicated.
-    // Builder intent + class -> scored engine selection with reason.
-    // Falls back gracefully. Manual (non-builder) paths unchanged.
-    let manager = crate::execution::manager::ExecutionManager::new();
-    let exec_ctx = prepared.execution_context.clone(); // reuse for context (limited but sufficient)
+    let exec_request = ExecutionRequest::chat(conversation, job.reasoning_level.clone());
+    let mut routing_context = ExecutionContext::from_pane_project(
+        job.assistant_message_id.clone(),
+        Some(job.pane_id.clone()),
+        None,
+        None,
+        None,
+    );
+    routing_context.credential = Some(prepared.execution_context.credential.clone());
+    routing_context.credential_service = credential_service;
 
-    let resolution = if job.provider_id == "builder-a" || job.provider_id == "builder-b" || job.provider_id == "builder-c" {
-        // Builder selected as "provider" for demo; derive class from model or default Implementation
-        let class = if job.model_id.to_lowercase().contains("review") || job.model_id.to_lowercase().contains("arch") {
-            crate::execution::ExecutionClass::Review
-        } else if job.model_id.to_lowercase().contains("test") || job.model_id.to_lowercase().contains("debug") {
-            crate::execution::ExecutionClass::Testing
-        } else {
-            crate::execution::ExecutionClass::Implementation
-        };
-        // Use manager for intelligent choice + reason (logged). Use minimal context for resolution.
-        // Minimal resolution call (context passed is approximate for this phase)
-        let dummy_ctx = crate::execution::ExecutionContext::local(job.pane_id.clone());
-        let res = crate::execution::manager::ExecutionManager::resolve(Some(&job.provider_id), Some(class.clone()), &dummy_ctx, &crate::execution::ExecutionRequest::chat(
-            // Use empty conversation for resolution decision only (real one is prepared later)
-            crate::models::Conversation::new("resolution", crate::models::Model::Custom("decision".into())),
-            job.reasoning_level.clone()
-        ));
-        eprintln!("[ExecutionManager] Builder={} Class={} -> Engine={} Model={} Reason: {}",
-            job.provider_id, class.as_str(), res.engine_id, res.model, res.reason);
-        res
-    } else if job.model_id.to_lowercase().contains("grok") || job.provider_id.to_lowercase().contains("grok") {
-        // Direct grok model
-        crate::execution::ExecutionResolution {
-            engine_id: "grok".to_string(),
-            model: job.model_id.clone(),
-            effort: job.reasoning_level.clone().unwrap_or_else(|| "high".to_string()),
-            reason: "Direct grok model selection".to_string(),
-            class: crate::execution::ExecutionClass::Implementation,
-            policy_applied: false,
-        }
-    } else {
-        // Legacy / OpenAI direct
-        crate::execution::ExecutionResolution {
-            engine_id: job.provider_id.clone(),
-            model: job.model_id.clone(),
-            effort: job.reasoning_level.clone().unwrap_or_else(|| "medium".to_string()),
-            reason: "Direct provider/model selection".to_string(),
-            class: crate::execution::ExecutionClass::General,
-            policy_applied: false,
-        }
-    };
+    let route_id = job.builder_id.as_deref().unwrap_or(&job.provider_id);
+    let resolution = ExecutionManager::resolve_stream_route(
+        route_id,
+        &job.model_id,
+        job.reasoning_level.as_deref(),
+        &routing_context,
+        &exec_request,
+    );
 
     let engine_key = resolution.engine_id.clone();
-    let effective_model = resolution.model.clone();
-    let effective_effort = resolution.effort.clone();
 
     // Note: We keep using conversation as-is (manager decision logged). Model/effort could be injected but to avoid changing execution behavior we note them.
     if !resolution.reason.is_empty() {
@@ -194,23 +164,9 @@ pub async fn run_background_stream_chat_inner<R: Runtime>(
             ))
         })?;
 
-    let openai_span = PerfSpan::start("OPENAI_REQUEST_DURATION_MS");
-    let openai_request_start = std::time::Instant::now();
-    trace_runtime_phase("openai_stream", "start");
-
-    // Build generalized request and context (future-proof)
-    let exec_request = ExecutionRequest::chat(conversation, job.reasoning_level.clone());
-
-    // Build a rich but minimal ExecutionContext from existing data.
-    // For the current OpenAI chat path, credential material is still supplied.
-    // Local engines will see credential = None.
-    let exec_context = ExecutionContext::from_pane_project(
-        job.assistant_message_id.clone(),
-        Some(job.pane_id.clone()),
-        None, // project enrichment happens outside engine (unchanged)
-        None,
-        None, // cwd can be set by specific engines or future logic
-    );
+    let engine_span = PerfSpan::start("ENGINE_REQUEST_DURATION_MS");
+    let engine_request_start = std::time::Instant::now();
+    trace_runtime_phase("engine_stream", "start");
 
     // Buffer only used for finish (deltas now driven by events)
     let finish_write_buffer = StreamWriteBuffer::new(
@@ -234,7 +190,7 @@ pub async fn run_background_stream_chat_inner<R: Runtime>(
             match event {
                 ExecutionEvent::TextDelta { content } => {
                     if !started {
-                        trace_perf_metric("OPENAI_REQUEST_DURATION_MS", openai_request_start.elapsed().as_millis());
+                        trace_perf_metric("ENGINE_REQUEST_DURATION_MS", engine_request_start.elapsed().as_millis());
                         started = true;
                     }
                     if let Err(error) = write_buffer.push(&app_clone, &content) {
@@ -258,7 +214,7 @@ pub async fn run_background_stream_chat_inner<R: Runtime>(
     // Call the generalized engine API
     let stream_result = engine
         .execute(
-            exec_context,
+            routing_context,
             exec_request,
             Box::new(move |event| {
                 let _ = event_tx.send(event);
@@ -282,11 +238,11 @@ pub async fn run_background_stream_chat_inner<R: Runtime>(
 
     finish_write_buffer.finish_with_complete(app).await?;
 
-    trace_runtime_phase("openai_stream", "complete");
+    trace_runtime_phase("engine_stream", "complete");
 
     // Post-stream metric/tracing kept for diagnostic parity. Event worker handled first-chunk timing.
-    trace_perf_metric("OPENAI_STREAM_TOTAL_MS", openai_span.elapsed_ms());
-    let _ = openai_span.finish();
+    trace_perf_metric("ENGINE_STREAM_TOTAL_MS", engine_span.elapsed_ms());
+    let _ = engine_span.finish();
     total_span.finish();
     Ok(())
 }
@@ -312,6 +268,7 @@ pub fn stream_chat_with_services<R: Runtime>(
     let job = StreamChatJob {
         pane_id: pane_id.to_string(),
         provider_id: provider_id.to_string(),
+        builder_id: None,
         account_id: account_id.to_string(),
         model_id: model_id.to_string(),
         assistant_message_id: assistant_message_id.to_string(),
@@ -322,6 +279,7 @@ pub fn stream_chat_with_services<R: Runtime>(
         app,
         database,
         credentials,
+        None,
         oauth,
         stream_persistence,
         scope_cache,

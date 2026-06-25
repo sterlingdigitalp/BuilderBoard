@@ -36,7 +36,7 @@ export function AccountCreateForm({ provider, isDisabled, onCreate }: AccountCre
   if (provider.authMode !== "api_key") {
     return (
       <div style={{ color: "var(--button-fg)", fontSize: "0.82rem" }}>
-        API-key accounts are not available for this provider.
+        API accounts are not available for this service.
       </div>
     );
   }
@@ -69,7 +69,7 @@ export function AccountCreateForm({ provider, isDisabled, onCreate }: AccountCre
         Default account
       </label>
       <button type="submit" disabled={isDisabled || !canCreate}>
-        Create API Key Account
+        Create API Account
       </button>
     </form>
   );

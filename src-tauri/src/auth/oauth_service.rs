@@ -34,7 +34,7 @@ pub struct OAuthClientCredentials {
 pub type GoogleOAuthCredentials = OAuthClientCredentials;
 
 pub(crate) fn oauth_log(message: impl AsRef<str>) {
-    eprintln!("[OAuth] {}", message.as_ref());
+    crate::runtime_diagnostics::trace_runtime_phase("oauth", message.as_ref());
 }
 
 fn oauth_log_response(stage: &str, status: u16, body: &str) {

@@ -653,13 +653,13 @@ fn trace_provider_adapter(auth_type: &str, endpoint: &str, model_id: &str) {
 
 fn trace_openai_request_sent(sent: bool) {
     if std::env::var("BUILDERBOARD_TRACE_OPENAI_EXECUTION").as_deref() == Ok("1") {
-        println!("OPENAI_REQUEST_SENT={sent}");
+        crate::runtime_diagnostics::trace_runtime_metric("ENGINE_REQUEST_SENT", sent);
     }
 }
 
 fn trace_openai_response_status(status: impl std::fmt::Display) {
     if std::env::var("BUILDERBOARD_TRACE_OPENAI_EXECUTION").as_deref() == Ok("1") {
-        println!("OPENAI_RESPONSE_STATUS={status}");
+        crate::runtime_diagnostics::trace_runtime_metric("ENGINE_RESPONSE_STATUS", status);
     }
 }
 

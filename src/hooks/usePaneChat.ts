@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { accountList } from "../stores/accountCommands";
 import { engineList, type EngineInfo } from "../stores/engineCommands";
@@ -33,7 +33,12 @@ export interface PaneChatState {
   inputValue: string;
   displayState: ChatDisplayState;
   isLoading: boolean;
+  isMessageLoading: boolean;
   error: string | null;
+  builderError: string | null;
+  engineError: string | null;
+  accountError: string | null;
+  messageError: string | null;
   canSend: boolean;
   setSelectedAccountId: (accountId: string) => void;
   selectBuilder: (builderName: string) => void;
@@ -45,11 +50,19 @@ export interface PaneChatState {
 }
 
 function errorMessage(error: unknown): string {
+  if (typeof error === "string") {
+    return error;
+  }
+
   return error instanceof Error ? error.message : "Chat command failed.";
 }
 
 function activeOpenAiAccounts(accounts: AccountDto[]): AccountDto[] {
   return accounts.filter((account) => account.providerId === "openai" && account.status === "active");
+}
+
+function firstSupportedValue<T extends string>(values: T[], current: T, fallback: T): T {
+  return values.includes(current) ? current : values[0] ?? fallback;
 }
 
 function replaceMessage(messages: MessageDto[], nextMessage: MessageDto): MessageDto[] {
@@ -89,18 +102,19 @@ export function usePaneChat(pane: PaneDefinition): PaneChatState {
   const [inputValue, setInputValue] = useState("");
   const [displayState, setDisplayState] = useState<ChatDisplayState>("idle");
   const [isLoading, setIsLoading] = useState(true);
+  const [isMessageLoading, setIsMessageLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
-  const currentEngine = useMemo(() => engines.find((e) => e.id === selectedEngineId) || engines[0], [engines, selectedEngineId]);
-  const currentModels = useMemo(() => currentEngine?.models || [selectedModelId], [currentEngine, selectedModelId]);
-  const currentEfforts = useMemo(() => currentEngine?.supportedEfforts || [selectedEffort], [currentEngine, selectedEffort]);
+  const [builderError, setBuilderError] = useState<string | null>(null);
+  const [engineError, setEngineError] = useState<string | null>(null);
+  const [accountError, setAccountError] = useState<string | null>(null);
+  const [messageLoadError, setMessageLoadError] = useState<string | null>(null);
 
   const reloadMessages = useCallback(async () => {
     try {
       setMessages(await messageList(pane.id));
+      setMessageLoadError(null);
     } catch (loadError) {
-      setError(errorMessage(loadError));
-      setDisplayState("error");
+      setMessageLoadError(`Message history unavailable: ${errorMessage(loadError)}`);
     }
   }, [pane.id]);
 
@@ -114,63 +128,107 @@ export function usePaneChat(pane: PaneDefinition): PaneChatState {
 
     async function loadChat() {
       setIsLoading(true);
+      setIsMessageLoading(true);
       setError(null);
 
-      try {
-        const [loadedAccounts, loadedMessages, loadedEngines, loadedBuilders] = await Promise.all([
-          accountList("openai"),
-          messageList(pane.id),
-          engineList(),
-          builderList()
-        ]);
+      const [accountsResult, messagesResult, enginesResult, buildersResult] = await Promise.allSettled([
+        accountList("openai"),
+        messageList(pane.id),
+        engineList(),
+        builderList()
+      ]);
 
-        if (!isActive) {
-          return;
-        }
-
-        const settings = paneSettingsFor(pane);
-        const activeEngine = loadedEngines.find((e) => e.id === settings.engineId) || loadedEngines[0];
-
-        setAccounts(loadedAccounts);
-        setEngines(loadedEngines);
-        setBuilders(loadedBuilders);
-        setMessages(loadedMessages);
-        const initialBuilder = loadedBuilders.find((b) => b.execution.preferredEngine === settings.engineId)?.name || "builder-c";
-        setSelectedBuilderId(initialBuilder);
-        setSelectedAccountId((currentAccountId) => {
-          const openAiAccounts = loadedAccounts.filter((a) => a.providerId === "openai" && a.status === "active");
-          if (openAiAccounts.some((account) => account.id === currentAccountId)) {
-            return currentAccountId;
-          }
-          const paneAccount = openAiAccounts.find((account) => account.id === pane.accountId);
-          const defaultAccount = openAiAccounts.find((account) => account.isDefault);
-          return paneAccount?.id ?? defaultAccount?.id ?? openAiAccounts[0]?.id ?? "";
-        });
-        setSelectedEngineId(settings.engineId || (activeEngine?.id ?? "openai"));
-        setSelectedModelId(settings.modelId || (activeEngine?.models[0] ?? settings.modelId));
-        setSelectedEffort(settings.effort);
-        setDisplayState("idle");
-      } catch (loadError) {
-        if (isActive) {
-          setError(errorMessage(loadError));
-          setDisplayState("error");
-        }
-      } finally {
-        if (isActive) {
-          setIsLoading(false);
-        }
+      if (!isActive) {
+        return;
       }
+
+      const loadedAccounts = accountsResult.status === "fulfilled" ? accountsResult.value : [];
+      const loadedMessages = messagesResult.status === "fulfilled" ? messagesResult.value : [];
+      const loadedEngines = enginesResult.status === "fulfilled" ? enginesResult.value : [];
+      const loadedBuilders = buildersResult.status === "fulfilled" ? buildersResult.value : [];
+
+      setAccountError(
+        accountsResult.status === "rejected" ? `Account lookup failed: ${errorMessage(accountsResult.reason)}` : null
+      );
+      setMessageLoadError(
+        messagesResult.status === "rejected"
+          ? `Message history unavailable: ${errorMessage(messagesResult.reason)}`
+          : null
+      );
+      setEngineError(
+        enginesResult.status === "rejected" ? `Engine discovery failed: ${errorMessage(enginesResult.reason)}` : null
+      );
+      setBuilderError(
+        buildersResult.status === "rejected"
+          ? `Builder registry unavailable: ${errorMessage(buildersResult.reason)}`
+          : null
+      );
+
+      const settings = paneSettingsFor(pane);
+      const activeEngine = loadedEngines.find((e) => e.id === settings.engineId) || loadedEngines[0];
+      const activeEngineId = activeEngine?.id ?? settings.engineId;
+      const activeModelId = firstSupportedValue(
+        activeEngine?.models ?? [],
+        settings.modelId,
+        settings.modelId
+      ) as ModelId;
+      const activeEffort = firstSupportedValue(
+        (activeEngine?.supportedEfforts ?? []) as EffortLevel[],
+        settings.effort,
+        settings.effort
+      );
+
+      setAccounts(loadedAccounts);
+      setEngines(loadedEngines);
+      setBuilders(loadedBuilders);
+      setMessages(loadedMessages);
+      const initialBuilder =
+        loadedBuilders.find((b) => b.execution.preferredEngine === activeEngineId)?.name ??
+        loadedBuilders[0]?.name ??
+        "";
+      setSelectedBuilderId(initialBuilder);
+      setSelectedAccountId((currentAccountId) => {
+        const openAiAccounts = loadedAccounts.filter((a) => a.providerId === "openai" && a.status === "active");
+        if (openAiAccounts.some((account) => account.id === currentAccountId)) {
+          return currentAccountId;
+        }
+        const paneAccount = openAiAccounts.find((account) => account.id === pane.accountId);
+        const defaultAccount = openAiAccounts.find((account) => account.isDefault);
+        return paneAccount?.id ?? defaultAccount?.id ?? openAiAccounts[0]?.id ?? "";
+      });
+      setSelectedEngineId(activeEngineId);
+      setSelectedModelId(activeModelId);
+      setSelectedEffort(activeEffort);
+      setDisplayState("idle");
+      setIsLoading(false);
+      setIsMessageLoading(false);
     }
 
     void loadChat();
 
     return () => { isActive = false; };
-  }, [pane.accountId, pane.id, pane.modelId]);
+  }, [pane.accountId, pane.id, pane.metadataJson, pane.modelId, pane.providerId]);
 
   const selectEngine = useCallback((engineId: string) => {
-    const next = updatePaneSettings(pane, { engineId });
+    const nextEngine = engines.find((engine) => engine.id === engineId);
+    const nextModel = firstSupportedValue(nextEngine?.models ?? [], selectedModelId, selectedModelId) as ModelId;
+    const nextEffort = firstSupportedValue(
+      (nextEngine?.supportedEfforts ?? []) as EffortLevel[],
+      selectedEffort,
+      selectedEffort
+    );
+    const next = updatePaneSettings(pane, {
+      engineId,
+      modelId: nextModel,
+      effort: nextEffort
+    });
     setSelectedEngineId(next.engineId);
-  }, [pane]);
+    setSelectedModelId(next.modelId);
+    setSelectedEffort(next.effort);
+    setSelectedBuilderId(
+      builders.find((builder) => builder.execution.preferredEngine === next.engineId)?.name ?? ""
+    );
+  }, [builders, engines, pane, selectedEffort, selectedModelId]);
 
   const selectBuilder = useCallback((builderName: string) => {
     const builder = builders.find((b) => b.name === builderName);
@@ -180,7 +238,7 @@ export function usePaneChat(pane: PaneDefinition): PaneChatState {
       const nextSettings = updatePaneSettings(pane, {
         engineId: exec.preferredEngine,
         modelId: exec.defaultModel,
-        effort: (exec.effort as any) || "medium",
+        effort: (exec.effort as EffortLevel) || "medium",
       });
       setSelectedEngineId(nextSettings.engineId);
       setSelectedModelId(nextSettings.modelId);
@@ -195,6 +253,24 @@ export function usePaneChat(pane: PaneDefinition): PaneChatState {
   const selectEffort = useCallback((effort: EffortLevel) => {
     setSelectedEffort(updatePaneSettings(pane, { effort }).effort);
   }, [pane]);
+
+  useEffect(() => {
+    if (builders.length === 0) {
+      if (selectedBuilderId) {
+        setSelectedBuilderId("");
+      }
+      return;
+    }
+
+    const selectedBuilder = builders.find((builder) => builder.name === selectedBuilderId);
+    if (selectedBuilder?.execution.preferredEngine === selectedEngineId) {
+      return;
+    }
+
+    setSelectedBuilderId(
+      builders.find((builder) => builder.execution.preferredEngine === selectedEngineId)?.name ?? ""
+    );
+  }, [builders, selectedBuilderId, selectedEngineId]);
 
   useEffect(() => {
     let isActive = true;
@@ -326,7 +402,7 @@ export function usePaneChat(pane: PaneDefinition): PaneChatState {
     }
 
     if (!selectedAccountId) {
-      setError("Connect an active OpenAI account before sending.");
+      setError("Select a connected account before sending.");
       setDisplayState("error");
       return;
     }
@@ -360,9 +436,11 @@ export function usePaneChat(pane: PaneDefinition): PaneChatState {
       void streamChat({
         paneId: pane.id,
         providerId: selectedEngineId,
+        builderId: selectedBuilderId || undefined,
         accountId: selectedAccountId,
         modelId: selectedModelId,
-        assistantMessageId
+        assistantMessageId,
+        reasoningLevel: selectedEffort
       }).catch(async (streamError) => {
         const message = errorMessage(streamError);
 
@@ -397,7 +475,16 @@ export function usePaneChat(pane: PaneDefinition): PaneChatState {
       setError(message);
       setDisplayState("error");
     }
-  }, [inputValue, pane.id, reloadMessages, selectedAccountId, selectedModelId, selectedEffort, selectedEngineId]);
+  }, [
+    inputValue,
+    pane.id,
+    reloadMessages,
+    selectedAccountId,
+    selectedBuilderId,
+    selectedEffort,
+    selectedEngineId,
+    selectedModelId
+  ]);
 
   return {
     accounts,
@@ -412,7 +499,12 @@ export function usePaneChat(pane: PaneDefinition): PaneChatState {
     inputValue,
     displayState,
     isLoading,
+    isMessageLoading,
     error,
+    builderError,
+    engineError,
+    accountError,
+    messageError: messageLoadError,
     canSend,
     setSelectedAccountId,
     selectBuilder,

@@ -40,6 +40,9 @@ button {
   --pane-border: #d4dbe3;
   --pane-header-bg: #f7f9fb;
   --text-strong: #17202a;
+  --status-ready: #1f7a4d;
+  --status-running: #1f6feb;
+  --status-attention: #b42318;
   --shadow: 0 16px 40px rgb(28 39 49 / 10%);
 }
 
@@ -55,5 +58,8 @@ button {
   --pane-border: #38414c;
   --pane-header-bg: #252c34;
   --text-strong: #f3f6f9;
+  --status-ready: #8bd6a5;
+  --status-running: #9cbcff;
+  --status-attention: #ff9b93;
   --shadow: 0 18px 44px rgb(0 0 0 / 24%);
 }

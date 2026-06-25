@@ -72,7 +72,10 @@ export function PaneGrid({
               +
             </button>
           </header>
-          <div className="pane__body" />
+          <div className="pane__body pane__empty">
+            <strong>BuilderBoard is ready.</strong>
+            <span>Create a pane to assign work.</span>
+          </div>
         </section>
       )}
       {panes.map((pane, index) => (
@@ -95,7 +98,7 @@ export function PaneGrid({
       {error || projectError ? (
         <section className="pane" aria-label="Pane persistence error">
           <header className="pane__header">
-            <h2>Project Error</h2>
+            <h2>Workspace Error</h2>
           </header>
           <div className="pane__body" aria-live="polite">
             {error ?? projectError}

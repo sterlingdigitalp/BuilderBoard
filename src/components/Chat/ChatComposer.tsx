@@ -85,7 +85,7 @@ export function ChatComposer({
         style={inputStyle}
         value={value}
         disabled={disabled}
-        placeholder="Message OpenAI"
+        placeholder="Message Builder"
         aria-label="Message"
         onChange={(event) => onChange(event.target.value)}
         onKeyDown={handleKeyDown}

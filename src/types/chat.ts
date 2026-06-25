@@ -34,9 +34,11 @@ export interface MessageCreateInput {
 export interface StreamChatInput {
   paneId: string;
   providerId: string;
+  builderId?: string;
   accountId: string;
   modelId: string;
   assistantMessageId: string;
+  reasoningLevel?: string;
 }
 
 export interface MessageStreamChunkEvent {

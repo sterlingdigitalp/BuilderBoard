@@ -22,14 +22,38 @@ interface PaneProps {
 
 function statusLabel(state: string): string {
   if (state === "idle") {
-    return "";
+    return "Ready";
+  }
+
+  if (state === "sending") {
+    return "Queued";
   }
 
   if (state === "enriching") {
-    return "gathering context";
+    return "Running";
   }
 
-  return state;
+  if (state === "streaming") {
+    return "Streaming";
+  }
+
+  if (state === "error") {
+    return "Needs Attention";
+  }
+
+  return "Running";
+}
+
+function statusTone(state: string): string {
+  if (state === "error") {
+    return " pane__status--attention";
+  }
+
+  if (state === "sending" || state === "enriching" || state === "streaming") {
+    return " pane__status--running";
+  }
+
+  return " pane__status--ready";
 }
 
 export function Pane({
@@ -52,7 +76,7 @@ export function Pane({
     chat.displayState === "sending" ||
     chat.displayState === "enriching" ||
     chat.displayState === "streaming";
-  const isControlsDisabled = chat.isLoading || isBusy || isMutating;
+  const isControlsDisabled = isBusy || isMutating;
   const status = statusLabel(chat.displayState);
 
   useEffect(() => {
@@ -82,6 +106,14 @@ export function Pane({
           projects={projects}
           project={project}
           disabled={isControlsDisabled}
+          builderError={chat.builderError}
+          engineError={chat.engineError}
+          accountError={chat.accountError}
+          statusSlot={
+            <span className={`pane__status${statusTone(chat.displayState)}`} aria-live="polite">
+              {status}
+            </span>
+          }
           onSelectBuilder={chat.selectBuilder}
           onSelectEngine={chat.selectEngine}
           onSelectAccount={chat.setSelectedAccountId}
@@ -90,16 +122,6 @@ export function Pane({
           onSelectProject={onSelectProject}
           onCreateProject={onCreateProject}
         />
-        {chat.engines.length > 0 && (
-          <div style={{ fontSize: "0.6rem", opacity: 0.7, padding: "0 4px" }} title="Engine capabilities and health">
-            {chat.selectedEngineId} | {chat.engines.find(e => e.id === chat.selectedEngineId)?.health} | efforts: {chat.engines.find(e => e.id === chat.selectedEngineId)?.supportedEfforts?.join(",")}
-          </div>
-        )}
-        {status ? (
-          <span className="pane__status" aria-live="polite">
-            {status}
-          </span>
-        ) : null}
         {onCreate ? (
           <button
             className="pane__icon-button"

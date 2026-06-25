@@ -27,7 +27,7 @@ function authLabel(authType: AccountDto["authType"]): string {
 
 function oauthStatusLabel(status: OAuthConnectionStatus): string {
   if (status === "idle") {
-    return "OAuth ready";
+    return "Ready";
   }
 
   return status[0].toUpperCase() + status.slice(1);
@@ -35,7 +35,7 @@ function oauthStatusLabel(status: OAuthConnectionStatus): string {
 
 function metadataText(account: AccountDto): string {
   if (account.authType !== "oauth") {
-    return "API-key account";
+    return "API account";
   }
 
   return [
@@ -83,7 +83,7 @@ export function AccountProviderSection({
               {oauthButtonLabel(provider.id)}
             </button>
             <span style={{ color: "var(--button-fg)", fontSize: "0.82rem" }}>
-              OAuth Status: {oauthStatusLabel(oauthStatus)}
+              Connection Status: {oauthStatusLabel(oauthStatus)}
             </span>
             {oauthMessage ? (
               <span style={{ color: "var(--button-fg)", fontSize: "0.82rem" }}>{oauthMessage}</span>
@@ -105,9 +105,9 @@ export function AccountProviderSection({
                   padding: 10
                 }}
               >
-                <span>Provider: {provider.displayName}</span>
+                <span>Service: {provider.displayName}</span>
                 <strong>{account.label}</strong>
-                <span>Auth Type: {authLabel(account.authType)}</span>
+                <span>Connection: {authLabel(account.authType)}</span>
                 <span>Status: {statusLabel(account.status)}</span>
                 <span>Default: {account.isDefault ? "Yes" : "No"}</span>
                 {account.authType === "oauth" ? (

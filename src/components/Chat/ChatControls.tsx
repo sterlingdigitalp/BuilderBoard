@@ -1,4 +1,4 @@
-import type { CSSProperties } from "react";
+import type { ReactNode } from "react";
 import type { AccountDto } from "../../types/accounts";
 import type { EffortLevel, ModelId } from "../../types/paneSettings";
 import type { ProjectDto } from "../../types/projects";
@@ -20,6 +20,10 @@ interface ChatControlsProps {
   projects: ProjectDto[];
   project: ProjectDto | null;
   disabled: boolean;
+  builderError: string | null;
+  engineError: string | null;
+  accountError: string | null;
+  statusSlot: ReactNode;
   onSelectBuilder: (builderName: string) => void;
   onSelectEngine: (engineId: string) => void;
   onSelectAccount: (accountId: string) => void;
@@ -29,43 +33,27 @@ interface ChatControlsProps {
   onCreateProject: () => void;
 }
 
-const rowStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "18fr 18fr 28fr 18fr 18fr",
-  gap: 3,
-  minWidth: 0,
-  flex: "1 1 auto"
-};
+function titleCase(value: string): string {
+  if (value.length === 0) {
+    return "";
+  }
 
-const fieldStyle: CSSProperties = {
-  display: "block",
-  minWidth: 0
-};
+  return `${value[0].toUpperCase()}${value.slice(1)}`;
+}
 
-const selectStyle: CSSProperties = {
-  width: "100%",
-  minWidth: 0,
-  height: 24,
-  border: "1px solid var(--pane-border)",
-  borderRadius: 5,
-  background: "var(--button-bg)",
-  color: "var(--text-strong)",
-  font: "inherit",
-  fontSize: "0.68rem",
-  padding: "0 2px"
-};
-
-const projectSelectStyle: CSSProperties = {
-  ...selectStyle,
-  color: "var(--button-active-bg)",
-  fontSize: "0.7rem",
-  fontWeight: 700,
-  padding: "0 5px"
-};
+function effortLabel(effort: string): string {
+  return effort === "max" ? "Max" : titleCase(effort);
+}
 
 function accountOptionLabel(account: AccountDto): string {
   const authType = account.authType === "oauth" ? "OAuth" : "API";
-  return account.isDefault ? `${authType} *` : authType;
+  const label = account.label.trim();
+
+  if (account.isDefault) {
+    return `Default ${authType}`;
+  }
+
+  return label.length > 0 ? `${label} ${authType}` : authType;
 }
 
 function projectTooltip(project: ProjectDto | null): string {
@@ -88,6 +76,10 @@ export function ChatControls({
   projects,
   project,
   disabled,
+  builderError,
+  engineError,
+  accountError,
+  statusSlot,
   onSelectBuilder,
   onSelectEngine,
   onSelectAccount,
@@ -97,75 +89,19 @@ export function ChatControls({
   onCreateProject
 }: ChatControlsProps) {
   const selectedProjectId = project?.id ?? "";
-  const currentEngine = engines.find((e) => e.id === selectedEngineId) || engines[0];
-  const modelOptions = currentEngine ? currentEngine.models.map(m => ({id: m, label: m})) : [];
-  const effortOptions = currentEngine ? currentEngine.supportedEfforts.map(e => ({id: e as any, label: e})) : defaultEffortOptions;
+  const currentEngine = engines.find((engine) => engine.id === selectedEngineId) || engines[0];
+  const modelOptions = currentEngine
+    ? currentEngine.models.map((model) => ({ id: model, label: model }))
+    : [];
+  const effortOptions = currentEngine
+    ? currentEngine.supportedEfforts.map((effort) => ({ id: effort as EffortLevel, label: effort }))
+    : defaultEffortOptions;
 
   return (
-    <div style={rowStyle} aria-label="Chat controls">
-      <label style={fieldStyle}>
+    <div className="chat-controls" aria-label="Pane controls">
+      <label className="chat-controls__field chat-controls__field--project" title={projectTooltip(project)}>
         <select
-          style={selectStyle}
-          value={selectedBuilderId}
-          disabled={disabled || builders.length === 0}
-          onChange={(event) => onSelectBuilder(event.target.value)}
-          aria-label="Builder"
-        >
-          {builders.length === 0 ? (
-            <option value="">No builders</option>
-          ) : (
-            builders.map((b) => (
-              <option key={b.name} value={b.name}>
-                {b.displayName}
-              </option>
-            ))
-          )}
-        </select>
-      </label>
-
-      <label style={fieldStyle}>
-        <select
-          style={selectStyle}
-          value={selectedEngineId}
-          disabled={disabled || engines.length === 0}
-          onChange={(event) => onSelectEngine(event.target.value)}
-          aria-label="Engine"
-        >
-          {engines.length === 0 ? (
-            <option value="">No engines</option>
-          ) : (
-            engines.map((eng) => (
-              <option key={eng.id} value={eng.id}>
-                {eng.displayName} ({eng.health})
-              </option>
-            ))
-          )}
-        </select>
-      </label>
-
-      <label style={fieldStyle}>
-        <select
-          style={selectStyle}
-          value={selectedAccountId}
-          disabled={disabled || accounts.length === 0 || selectedEngineId === "grok"}
-          onChange={(event) => onSelectAccount(event.target.value)}
-          aria-label="Account"
-        >
-          {accounts.length === 0 ? (
-            <option value="">None</option>
-          ) : (
-            accounts.map((account) => (
-              <option key={account.id} value={account.id}>
-                {accountOptionLabel(account)}
-              </option>
-            ))
-          )}
-        </select>
-      </label>
-
-      <label style={fieldStyle} title={projectTooltip(project)}>
-        <select
-          style={projectSelectStyle}
+          className="chat-controls__select chat-controls__select--project"
           value={selectedProjectId}
           disabled={disabled || projects.length === 0}
           onChange={(event) => {
@@ -179,40 +115,71 @@ export function ChatControls({
           aria-label={`Project ${project?.name ?? "not attached"}`}
         >
           {projects.length === 0 ? (
-            <option value="">No project</option>
+            <option value="">No Project</option>
           ) : (
             <>
-              {!selectedProjectId ? <option value="">Select project</option> : null}
+              {!selectedProjectId ? <option value="">Select Project</option> : null}
               {projects.map((entry) => (
                 <option key={entry.id} value={entry.id}>
                   {entry.name}
                 </option>
               ))}
-              <option value={NEW_PROJECT_VALUE}>* New Project</option>
+              <option value={NEW_PROJECT_VALUE}>Add Project...</option>
             </>
           )}
         </select>
       </label>
 
-      <label style={fieldStyle}>
+      <label className="chat-controls__field chat-controls__field--builder">
         <select
-          style={selectStyle}
-          value={selectedModelId}
-          disabled={disabled || modelOptions.length === 0}
-          onChange={(event) => onSelectModel(event.target.value as ModelId)}
-          aria-label="Model"
+          className="chat-controls__select chat-controls__select--builder"
+          value={selectedBuilderId}
+          disabled={disabled || builders.length === 0}
+          onChange={(event) => onSelectBuilder(event.target.value)}
+          aria-label="Builder"
         >
-          {modelOptions.map((option) => (
-            <option key={option.id} value={option.id}>
-              {option.label}
-            </option>
-          ))}
+          {builderError ? (
+            <option value={selectedBuilderId}>{builderError}</option>
+          ) : builders.length === 0 ? (
+            <option value="">No Builders Available</option>
+          ) : (
+            builders.map((builder) => (
+              <option key={builder.name} value={builder.name}>
+                {builder.displayName}
+              </option>
+            ))
+          )}
         </select>
       </label>
 
-      <label style={fieldStyle}>
+      <span className="chat-controls__status-slot">{statusSlot}</span>
+
+      <label className="chat-controls__field chat-controls__field--model">
         <select
-          style={selectStyle}
+          className="chat-controls__select"
+          value={selectedModelId}
+          disabled={disabled || Boolean(engineError) || modelOptions.length === 0}
+          onChange={(event) => onSelectModel(event.target.value as ModelId)}
+          aria-label="Model"
+          title={selectedModelId}
+        >
+          {engineError ? (
+            <option value={selectedModelId}>Model unavailable</option>
+          ) : modelOptions.length === 0 ? (
+            <option value={selectedModelId}>No Models Available</option>
+          ) : (
+            modelOptions.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.label}
+              </option>
+            ))
+          )}
+        </select>
+      </label>
+
+      <label className="chat-controls__field chat-controls__field--effort">
+        <select
+          className="chat-controls__select"
           value={selectedEffort}
           disabled={disabled || effortOptions.length === 0}
           onChange={(event) => onSelectEffort(event.target.value as EffortLevel)}
@@ -220,9 +187,55 @@ export function ChatControls({
         >
           {effortOptions.map((option) => (
             <option key={option.id} value={option.id}>
-              {option.label}
+              {effortLabel(option.label)}
             </option>
           ))}
+        </select>
+      </label>
+
+      <label className="chat-controls__field chat-controls__field--engine">
+        <select
+          className="chat-controls__select"
+          value={selectedEngineId}
+          disabled={disabled || Boolean(engineError) || engines.length === 0}
+          onChange={(event) => onSelectEngine(event.target.value)}
+          aria-label="Execution engine"
+          title={engineError ?? "Execution engine"}
+        >
+          {engineError ? (
+            <option value={selectedEngineId}>Engine discovery failed</option>
+          ) : engines.length === 0 ? (
+            <option value="">No Engines Available</option>
+          ) : (
+            engines.map((engine) => (
+              <option key={engine.id} value={engine.id}>
+                {engine.displayName}
+              </option>
+            ))
+          )}
+        </select>
+      </label>
+
+      <label className="chat-controls__field chat-controls__field--account">
+        <select
+          className="chat-controls__select"
+          value={selectedAccountId}
+          disabled={disabled || Boolean(accountError) || accounts.length === 0 || selectedEngineId === "grok"}
+          onChange={(event) => onSelectAccount(event.target.value)}
+          aria-label="Account"
+          title={accountError ?? "Account"}
+        >
+          {accountError ? (
+            <option value={selectedAccountId}>No accounts available</option>
+          ) : accounts.length === 0 ? (
+            <option value="">No Account</option>
+          ) : (
+            accounts.map((account) => (
+              <option key={account.id} value={account.id}>
+                {accountOptionLabel(account)}
+              </option>
+            ))
+          )}
         </select>
       </label>
     </div>

@@ -25,15 +25,16 @@ const errorStyle: CSSProperties = {
 
 export function ChatPane({ chat }: ChatPaneProps) {
   const isBusy = chat.displayState === "sending" || chat.displayState === "streaming";
-  const isComposerDisabled = chat.isLoading || isBusy;
+  const isComposerDisabled = isBusy;
 
   return (
     <div style={shellStyle} aria-label="Chat interface">
-      <MessageList messages={chat.messages} isLoading={chat.isLoading} />
+      <MessageList messages={chat.messages} isLoading={chat.isMessageLoading} error={chat.messageError} />
 
       {chat.error ? (
         <div style={errorStyle} role="alert">
-          {chat.error}
+          <strong>Execution Failed</strong>
+          <span> {chat.error}</span>
         </div>
       ) : null}
 

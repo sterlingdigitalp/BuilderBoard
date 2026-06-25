@@ -5,8 +5,6 @@
 //! Manager scores engines, applies policy, handles intelligent fallback with reasons.
 //! Extends existing architecture; engines and builders remain unchanged.
 
-use std::sync::Arc;
-
 use crate::builders::{Builder, global_builder_registry};
 use crate::execution::capabilities::EngineCapabilities;
 use crate::execution::context::ExecutionContext;
@@ -189,7 +187,7 @@ impl ExecutionManager {
         builder_name: Option<&str>,
         requested_class: Option<ExecutionClass>,
         context: &ExecutionContext,
-        request: &ExecutionRequest,
+        _request: &ExecutionRequest,
     ) -> ExecutionResolution {
         let builder_reg = global_builder_registry();
         let engine_reg = global_engine_registry();
@@ -316,6 +314,39 @@ impl ExecutionManager {
             _ => ExecutionClass::General,
         };
         Self::resolve(builder_name, Some(class), context, request)
+    }
+
+    /// Resolve the current stream execution route from either a Builder name or a direct engine id.
+    /// This keeps stream execution generic: adding a Builder changes BuilderRegistry only.
+    pub fn resolve_stream_route(
+        route_id: &str,
+        model_id: &str,
+        effort: Option<&str>,
+        context: &ExecutionContext,
+        request: &ExecutionRequest,
+    ) -> ExecutionResolution {
+        if global_builder_registry().get(route_id).is_some() {
+            return Self::resolve_for_chat(Some(route_id), context, request);
+        }
+
+        let engine_exists = global_engine_registry().get(route_id).is_some();
+        let class = match request {
+            ExecutionRequest::Chat(_) => ExecutionClass::General,
+            _ => ExecutionClass::General,
+        };
+
+        ExecutionResolution {
+            engine_id: route_id.to_string(),
+            model: model_id.to_string(),
+            effort: effort.unwrap_or("medium").to_string(),
+            reason: if engine_exists {
+                "Direct engine selection".to_string()
+            } else {
+                "Unregistered engine selected; execution will fail if no engine is available".to_string()
+            },
+            class,
+            policy_applied: false,
+        }
     }
 }
 

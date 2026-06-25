@@ -170,7 +170,10 @@ fn run_persistence_worker(database: Arc<Database>, receiver: mpsc::Receiver<Pers
         match receiver.recv_timeout(Duration::from_millis(WORKER_POLL_MS)) {
             Ok(envelope) => {
                 if let Err(error) = handle_envelope(&database, &mut pending, envelope) {
-                    eprintln!("stream persistence worker error: {error}");
+                    crate::runtime_diagnostics::trace_runtime_phase(
+                        "stream_persistence_worker_error",
+                        error,
+                    );
                 }
             }
             Err(RecvTimeoutError::Timeout) => {
@@ -272,4 +275,3 @@ fn flush_pending_for_message(
         flush_stream_delta(connection, message_id, &delta)
     })
 }
-

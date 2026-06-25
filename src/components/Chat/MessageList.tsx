@@ -4,6 +4,7 @@ import type { MessageDto } from "../../types/chat";
 interface MessageListProps {
   messages: MessageDto[];
   isLoading: boolean;
+  error: string | null;
 }
 
 const listStyle: CSSProperties = {
@@ -58,10 +59,10 @@ const metaStyle: CSSProperties = {
 };
 
 const pendingText: Record<MessageDto["status"], string> = {
-  pending: "Waiting for response...",
+  pending: "Queued...",
   streaming: "Streaming...",
   complete: "",
-  error: "Assistant response failed."
+  error: "Execution failed."
 };
 
 function displayContent(message: MessageDto): string {
@@ -73,10 +74,34 @@ function displayContent(message: MessageDto): string {
 }
 
 function roleLabel(role: MessageDto["role"]): string {
-  return role === "user" ? "You" : role;
+  if (role === "user") {
+    return "You";
+  }
+
+  if (role === "assistant") {
+    return "Builder";
+  }
+
+  return role === "tool" ? "Tool" : "System";
 }
 
-export function MessageList({ messages, isLoading }: MessageListProps) {
+function statusLabel(status: MessageDto["status"]): string {
+  if (status === "complete") {
+    return "";
+  }
+
+  if (status === "pending") {
+    return "Queued";
+  }
+
+  if (status === "error") {
+    return "Needs Attention";
+  }
+
+  return "Streaming";
+}
+
+export function MessageList({ messages, isLoading, error }: MessageListProps) {
   if (isLoading) {
     return (
       <div style={emptyStyle} aria-busy="true">
@@ -85,10 +110,18 @@ export function MessageList({ messages, isLoading }: MessageListProps) {
     );
   }
 
+  if (error) {
+    return (
+      <div style={emptyStyle} aria-label="Message history unavailable">
+        {error}
+      </div>
+    );
+  }
+
   if (messages.length === 0) {
     return (
       <div style={emptyStyle} aria-label="No messages">
-        Start a conversation in this pane.
+        Builder is ready.
       </div>
     );
   }
@@ -99,11 +132,11 @@ export function MessageList({ messages, isLoading }: MessageListProps) {
         <article
           key={message.id}
           style={message.role === "user" ? userMessageStyle : messageStyle}
-          aria-label={`${roleLabel(message.role)} message, ${message.status}`}
+          aria-label={`${roleLabel(message.role)} message${statusLabel(message.status) ? `, ${statusLabel(message.status)}` : ""}`}
         >
           <div style={metaStyle}>
             <span>{roleLabel(message.role)}</span>
-            <span>{message.status}</span>
+            {statusLabel(message.status) ? <span>{statusLabel(message.status)}</span> : null}
           </div>
           <div>{displayContent(message)}</div>
         </article>

@@ -5,7 +5,7 @@ use tauri::{AppHandle, Emitter, Runtime, State};
 use crate::auth::{CredentialService, OAuthService};
 use crate::chat::{PaneExecutionContext, ProviderResolutionService};
 use crate::builders::global_builder_registry;
-use crate::execution::{global_engine_registry, ExecutionManager, ExecutionClass};
+use crate::execution::{global_engine_registry, ExecutionClass};
 use crate::filesystem_intent::{FilesystemToolCall, route_filesystem_tools};
 use crate::project_scope_cache::ProjectScopeCache;
 use crate::stream_execution::{run_background_stream_chat, StreamChatJob};
@@ -109,7 +109,7 @@ pub fn builder_list() -> Vec<serde_json::Value> {
 
 #[tauri::command]
 pub fn resolve_execution(builder: Option<String>, class: Option<String>) -> serde_json::Value {
-    let mgr = crate::execution::manager::ExecutionManager::new();
+    let _mgr = crate::execution::manager::ExecutionManager::new();
     let ctx = crate::execution::ExecutionContext::local("resolve".to_string());
     let req = crate::execution::ExecutionRequest::chat(
         crate::models::Conversation::new("resolve", crate::models::Model::Custom("resolve".to_string())),
@@ -358,15 +358,20 @@ pub async fn stream_chat(
     scope_cache: State<'_, Arc<ProjectScopeCache>>,
     pane_id: String,
     provider_id: String,
+    builder_id: Option<String>,
     account_id: String,
     model_id: String,
     assistant_message_id: String,
     reasoning_level: Option<String>,
 ) -> Result<(), String> {
-    // Engine selection replaces hardcoded OpenAI check. Only engines that are
-    // registered (currently only openai) are allowed. Behavior is identical.
-    if global_engine_registry().get(&provider_id).is_none() {
-        let message = "Only OpenAI execution is supported in Phase 4B.".to_string();
+    let route_is_engine = global_engine_registry().get(&provider_id).is_some();
+    let route_is_builder = builder_id
+        .as_deref()
+        .and_then(|builder| global_builder_registry().get(builder))
+        .is_some();
+
+    if !route_is_engine && !route_is_builder {
+        let message = "Selected execution route is not available.".to_string();
         emit_stream_error(
             &app,
             &pane_id,
@@ -383,6 +388,7 @@ pub async fn stream_chat(
     let job = StreamChatJob {
         pane_id,
         provider_id,
+        builder_id,
         account_id,
         model_id,
         assistant_message_id,
@@ -472,13 +478,42 @@ pub(crate) fn prepare_stream_execution_db_only(
     pane_for_resolution.model_id = Some(model_id.to_string());
     pane_for_resolution.metadata_json = Some(metadata_json);
 
-    let execution_context = ProviderResolutionService::load_execution_context_from_pane(
+    let execution_context = match ProviderResolutionService::load_execution_context_from_pane(
         connection,
         &pane_for_resolution,
-    )
-    .map_err(|error| {
-        StorageError::InvalidInput(format!("provider resolution error: {error:?}"))
-    })?;
+    ) {
+        Ok(context) => context,
+        Err(_error) if account_id.is_empty() && global_engine_registry().get(provider_id).is_some() => {
+            PaneExecutionContext {
+                provider: ProviderDto {
+                    id: provider_id.to_string(),
+                    provider_type: provider_id.to_string(),
+                    display_name: provider_id.to_string(),
+                    enabled: true,
+                    auth_mode: "none".to_string(),
+                    supports_chat: true,
+                    supports_streaming: true,
+                    supports_tool_use: true,
+                    supports_vision: false,
+                    context_window: None,
+                    locality: "local".to_string(),
+                },
+                credential: crate::auth::CredentialHandle {
+                    provider_id: provider_id.to_string(),
+                    account_id: String::new(),
+                    auth_type: "none".to_string(),
+                    credential_ref: String::new(),
+                    token_expires_at: None,
+                },
+                oauth_external_account_id: None,
+            }
+        }
+        Err(error) => {
+            return Err(StorageError::InvalidInput(format!(
+                "provider resolution error: {error:?}"
+            )));
+        }
+    };
     let mut conversation = conversation_for_stream(connection, pane_id, model_id)?;
     let project_id = pane.project_id.as_deref().ok_or_else(|| {
         StorageError::InvalidInput(format!(

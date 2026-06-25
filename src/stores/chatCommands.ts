@@ -285,8 +285,10 @@ export async function streamChat(input: StreamChatInput): Promise<void> {
   await invoke("stream_chat", {
     paneId: input.paneId,
     providerId: input.providerId,
+    builderId: input.builderId ?? null,
     accountId: input.accountId,
     modelId: input.modelId,
-    assistantMessageId: input.assistantMessageId
+    assistantMessageId: input.assistantMessageId,
+    reasoningLevel: input.reasoningLevel ?? null
   });
 }

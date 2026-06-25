@@ -4,10 +4,13 @@ use uuid::Uuid;
 
 use crate::projects::repository::ProjectRepository;
 use crate::storage::error::{StorageError, StorageResult};
-use crate::storage::models::{CreatePaneRequest, PaneDto, PaneHeaderDisplayDto, SHELL_WORKSPACE_ID};
+use crate::storage::models::{
+    CreatePaneRequest, PaneDto, PaneHeaderDisplayDto, SHELL_WORKSPACE_ID,
+};
 use crate::storage::repositories::workspaces::WorkspaceRepository;
 
-const PANE_SELECT: &str = "SELECT id, workspace_id, title, role_label, sort_order, width_ratio, height_ratio,
+const PANE_SELECT: &str =
+    "SELECT id, workspace_id, title, role_label, sort_order, width_ratio, height_ratio,
         provider_id, account_id, model_id, status, project_id, layout_json, metadata_json,
         created_at, updated_at";
 
@@ -162,7 +165,10 @@ impl PaneRepository {
     }
 
     /// Hot-path pane fetch for stream execution. Skips header display enrichment queries.
-    pub fn get_open_for_execution(connection: &Connection, pane_id: &str) -> StorageResult<PaneDto> {
+    pub fn get_open_for_execution(
+        connection: &Connection,
+        pane_id: &str,
+    ) -> StorageResult<PaneDto> {
         let sql = format!("{PANE_SELECT} FROM panes WHERE id = ?1 AND closed_at IS NULL");
         let pane = connection
             .query_row(&sql, [pane_id], map_pane_row)
@@ -206,9 +212,10 @@ fn enrich_header_display(connection: &Connection, pane: &mut PaneDto) -> Storage
             .as_deref()
             .map(|provider_id| provider_display_label(connection, provider_id))
             .transpose()?,
-        auth_label: pane.account_id.as_deref().and_then(|account_id| {
-            account_auth_label(connection, account_id).ok()
-        }),
+        auth_label: pane
+            .account_id
+            .as_deref()
+            .and_then(|account_id| account_auth_label(connection, account_id).ok()),
         model_label: pane.model_id.as_deref().map(compact_model_label),
         reasoning_label: reasoning_display_label(pane.metadata_json.as_deref()),
     };

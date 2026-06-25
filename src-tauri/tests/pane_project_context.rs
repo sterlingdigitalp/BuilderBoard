@@ -71,38 +71,23 @@ fn multi_project_panes_remain_visible_with_independent_filesystem_scope() {
     assert_eq!(project_ids.iter().filter(|id| *id == &pepfox_id).count(), 1);
     assert_eq!(project_ids.iter().filter(|id| *id == &arete_id).count(), 1);
     assert_eq!(
-        project_ids
-            .iter()
-            .filter(|id| *id == &agenthive_id)
-            .count(),
+        project_ids.iter().filter(|id| *id == &agenthive_id).count(),
         2
     );
 
-    let pepfox_package = filesystem_read_file_with_database(
-        &database,
-        None,
-        Some(&pepfox_id),
-        "package.json",
-    )
-    .expect("read pepfox");
+    let pepfox_package =
+        filesystem_read_file_with_database(&database, None, Some(&pepfox_id), "package.json")
+            .expect("read pepfox");
     assert!(pepfox_package.content.contains("pepfox"));
 
-    let arete_package = filesystem_read_file_with_database(
-        &database,
-        None,
-        Some(&arete_id),
-        "package.json",
-    )
-    .expect("read arete");
+    let arete_package =
+        filesystem_read_file_with_database(&database, None, Some(&arete_id), "package.json")
+            .expect("read arete");
     assert!(arete_package.content.contains("arete"));
 
-    let agenthive_package = filesystem_read_file_with_database(
-        &database,
-        None,
-        Some(&agenthive_id),
-        "package.json",
-    )
-    .expect("read agenthive");
+    let agenthive_package =
+        filesystem_read_file_with_database(&database, None, Some(&agenthive_id), "package.json")
+            .expect("read agenthive");
     assert!(agenthive_package.content.contains("agenthive"));
 
     let pepfox_pane = panes

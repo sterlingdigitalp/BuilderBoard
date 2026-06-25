@@ -25,7 +25,7 @@ use std::time::Duration;
 use serde_json::Value;
 
 use crate::execution::capabilities::{EngineCapabilities, Locality, SupportedFeatures, Transport};
-use crate::execution::cli::{CLIProcessConfig, CLIExecutionEngine};
+use crate::execution::cli::{CLIExecutionEngine, CLIProcessConfig};
 use crate::execution::context::ExecutionContext;
 use crate::execution::engine::{ExecutionEngine, ExecutionError, ExecutionResult};
 use crate::execution::event::ExecutionEvent;
@@ -109,18 +109,33 @@ impl GrokBuildExecutionEngine {
                     }
                 }
                 "tool_call" | "tool_call_started" => {
-                    let name = value.get("tool").and_then(|v| v.as_str()).unwrap_or("tool").to_string();
+                    let name = value
+                        .get("tool")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("tool")
+                        .to_string();
                     out.push(ExecutionEvent::ToolCallStarted {
-                        call_id: value.get("id").and_then(|v| v.as_str()).unwrap_or(&name).to_string(),
+                        call_id: value
+                            .get("id")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or(&name)
+                            .to_string(),
                         name,
                         arguments: value.get("arguments").map(|a| a.to_string()),
                     });
                 }
                 "tool_call_finished" | "tool_result" => {
                     out.push(ExecutionEvent::ToolCallFinished {
-                        call_id: value.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                        call_id: value
+                            .get("id")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string(),
                         result: value.get("result").map(|r| r.to_string()),
-                        error: value.get("error").and_then(|e| e.as_str()).map(|s| s.to_string()),
+                        error: value
+                            .get("error")
+                            .and_then(|e| e.as_str())
+                            .map(|s| s.to_string()),
                     });
                 }
                 _ => {
@@ -241,12 +256,21 @@ impl ExecutionEngine for GrokBuildExecutionEngine {
     }
 
     fn supported_effort_levels(&self) -> Vec<String> {
-        vec!["low".to_string(), "medium".to_string(), "high".to_string(), "max".to_string()]
+        vec![
+            "low".to_string(),
+            "medium".to_string(),
+            "high".to_string(),
+            "max".to_string(),
+        ]
     }
 
     fn health(&self) -> String {
         // Check if grok CLI binary is available
-        if std::process::Command::new("grok").arg("--version").output().is_ok() {
+        if std::process::Command::new("grok")
+            .arg("--version")
+            .output()
+            .is_ok()
+        {
             "available".to_string()
         } else if std::path::Path::new("/Users/sterlingdigital/.grok/bin/grok").exists() {
             "available".to_string()
@@ -265,9 +289,7 @@ impl ExecutionEngine for GrokBuildExecutionEngine {
             ExecutionRequest::Chat(c) => c,
             other => {
                 let kind = other.kind().to_string();
-                return Box::pin(async move {
-                    Err(ExecutionError::UnsupportedRequest { kind })
-                });
+                return Box::pin(async move { Err(ExecutionError::UnsupportedRequest { kind }) });
             }
         };
 
@@ -313,7 +335,7 @@ impl ExecutionEngine for GrokBuildExecutionEngine {
             program,
             args,
             cwd: Some(cwd),
-            env: HashMap::new(), // inherit
+            env: HashMap::new(),                     // inherit
             timeout: Some(Duration::from_secs(300)), // 5 min safety
         };
 
@@ -323,7 +345,11 @@ impl ExecutionEngine for GrokBuildExecutionEngine {
             Box::new(move |v: serde_json::Value| -> Vec<ExecutionEvent> {
                 let mut evs = this.parse_grok_event(v);
                 for ev in &mut evs {
-                    if let ExecutionEvent::RunCompleted { execution_id: ref mut eid, .. } = ev {
+                    if let ExecutionEvent::RunCompleted {
+                        execution_id: ref mut eid,
+                        ..
+                    } = ev
+                    {
                         if eid.is_empty() {
                             *eid = exec_id.clone();
                         }

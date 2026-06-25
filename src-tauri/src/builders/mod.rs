@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BuilderExecutionPolicy {
     #[serde(default = "default_class")]
-    pub preferred_class: String,  // e.g. "implementation", "review"
+    pub preferred_class: String, // e.g. "implementation", "review"
     pub preferred_engine: String,
     #[serde(default)]
     pub fallback_engines: Vec<String>,
@@ -25,10 +25,16 @@ pub struct BuilderExecutionPolicy {
     pub memory_defaults: String, // e.g. "project:shared"
 }
 
-fn default_class() -> String { "implementation".to_string() }
+fn default_class() -> String {
+    "implementation".to_string()
+}
 
-fn default_effort() -> String { "medium".to_string() }
-fn default_model() -> String { "default".to_string() }
+fn default_effort() -> String {
+    "medium".to_string()
+}
+fn default_model() -> String {
+    "default".to_string()
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Builder {
@@ -63,11 +69,14 @@ pub struct BuilderRegistry {
 
 impl BuilderRegistry {
     pub fn new() -> Self {
-        Self { builders: HashMap::new() }
+        Self {
+            builders: HashMap::new(),
+        }
     }
 
     pub fn register(&mut self, builder: Builder) {
-        self.builders.insert(builder.name.clone(), Arc::new(builder));
+        self.builders
+            .insert(builder.name.clone(), Arc::new(builder));
     }
 
     pub fn get(&self, name: &str) -> Option<Arc<Builder>> {

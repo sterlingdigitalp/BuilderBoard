@@ -56,13 +56,9 @@ fn rail_launch_creates_pane_bound_to_project() {
     assert_eq!(created.workspace_id, SHELL_WORKSPACE_ID);
     assert_eq!(created.project_id.as_deref(), Some(pepfox_id.as_str()));
 
-    let package = filesystem_read_file_with_database(
-        &database,
-        None,
-        Some(&pepfox_id),
-        "package.json",
-    )
-    .expect("read pepfox package");
+    let package =
+        filesystem_read_file_with_database(&database, None, Some(&pepfox_id), "package.json")
+            .expect("read pepfox package");
     assert!(package.content.contains("pepfox"));
 }
 
@@ -93,19 +89,13 @@ fn pane_project_rebind_updates_filesystem_scope() {
         })
         .expect("create pane");
 
-    let pepfox_before = filesystem_read_file_with_database(
-        &database,
-        None,
-        Some(&pepfox_id),
-        "package.json",
-    )
-    .expect("read pepfox before rebind");
+    let pepfox_before =
+        filesystem_read_file_with_database(&database, None, Some(&pepfox_id), "package.json")
+            .expect("read pepfox before rebind");
     assert!(pepfox_before.content.contains("pepfox"));
 
     let rebound = database
-        .with_connection(|connection| {
-            PaneRepository::set_project(connection, &pane.id, &arete_id)
-        })
+        .with_connection(|connection| PaneRepository::set_project(connection, &pane.id, &arete_id))
         .expect("rebind pane");
 
     assert_eq!(rebound.project_id.as_deref(), Some(arete_id.as_str()));

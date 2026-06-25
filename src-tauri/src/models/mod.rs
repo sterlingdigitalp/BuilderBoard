@@ -78,9 +78,6 @@ mod tests {
 
     #[test]
     fn message_role_from_db_includes_tool() {
-        assert_eq!(
-            super::message_role_from_db("tool"),
-            Some(MessageRole::Tool)
-        );
+        assert_eq!(super::message_role_from_db("tool"), Some(MessageRole::Tool));
     }
 }

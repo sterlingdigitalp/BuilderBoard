@@ -38,7 +38,10 @@ pub fn project_metadata_map(
 }
 
 pub fn project_code_base(name: &str) -> String {
-    let chars: Vec<char> = name.chars().filter(|character| character.is_alphanumeric()).collect();
+    let chars: Vec<char> = name
+        .chars()
+        .filter(|character| character.is_alphanumeric())
+        .collect();
     if chars.is_empty() {
         return "Pr".to_string();
     }

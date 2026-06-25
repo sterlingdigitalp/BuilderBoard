@@ -1,0 +1,403 @@
+{
+  "input": [
+    {
+      "content": [
+        {
+          "text": "Create docs/test.md in this project. After creating it, reply exactly: I created docs/test.md.",
+          "type": "input_text"
+        }
+      ],
+      "role": "user"
+    },
+    {
+      "content": [
+        {
+          "text": "",
+          "type": "output_text"
+        }
+      ],
+      "role": "assistant"
+    },
+    {
+      "content": [
+        {
+          "text": "[Tool Result for 'filesystem.write']\nStatus: SUCCESS\nExit code: Some(0)\n0 bytes written to /Users/sterlingdigital/Knowledge_Service/docs/test.md",
+          "type": "input_text"
+        }
+      ],
+      "role": "user"
+    }
+  ],
+  "instructions": "Project: Knowledge_Service\nApproved root: /Users/sterlingdigital/Knowledge_Service\nFilesystem enrichment is running in the background before the model response begins.\nFilesystem tool results follow. Use these read-only approved-root results to answer the user. Do not claim you cannot access the project.\n[{\"tool\":\"list_directory\",\"input\":{\"path\":\".\"},\"output\":{\"entries\":[{\"entryType\":\"file\",\"modifiedAt\":\"2026-06-25T20:21:57.543379562+00:00\",\"name\":\".DS_Store\",\"path\":\".DS_Store\",\"sizeBytes\":8196},{\"entryType\":\"directory\",\"modifiedAt\":\"2026-06-25T20:48:57.341194061+00:00\",\"name\":\"docs\",\"path\":\"docs\",\"sizeBytes\":null},{\"entryType\":\"directory\",\"modifiedAt\":\"2026-06-25T20:48:00.735818241+00:00\",\"name\":\"integration_tests\",\"path\":\"integration_tests\",\"sizeBytes\":null},{\"entryType\":\"directory\",\"modifiedAt\":\"2026-06-25T20:44:57.925343733+00:00\",\"name\":\"src\",\"path\":\"src\",\"sizeBytes\":null},{\"entryType\":\"file\",\"modifiedAt\":\"2026-06-25T18:38:01.896507+00:00\",\"name\":\"STARTING.md\",\"path\":\"STARTING.md\",\"sizeBytes\":8901},{\"entryType\":\"directory\",\"modifiedAt\":\"2026-06-25T20:44:57.935591867+00:00\",\"name\":\"tests\",\"path\":\"tests\",\"sizeBytes\":null}],\"path\":\".\"}}]",
+  "model": "gpt-5.5",
+  "store": false,
+  "stream": true,
+  "tool_choice": "auto",
+  "tools": [
+    {
+      "description": "Search file contents using regex patterns.",
+      "name": "search_grep",
+      "parameters": {
+        "properties": {
+          "context": {
+            "description": "Context lines (optional)",
+            "type": "integer"
+          },
+          "fixed_string": {
+            "description": "Literal string search (optional)",
+            "type": "boolean"
+          },
+          "include": {
+            "description": "File extension filter (optional)",
+            "type": "string"
+          },
+          "max_results": {
+            "description": "Maximum results (optional, default 50)",
+            "type": "integer"
+          },
+          "path": {
+            "description": "Search root path (optional)",
+            "type": "string"
+          },
+          "pattern": {
+            "description": "Search pattern (regex)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "pattern"
+        ],
+        "type": "object"
+      },
+      "type": "function"
+    },
+    {
+      "description": "Read the contents of a file.",
+      "name": "filesystem_read",
+      "parameters": {
+        "properties": {
+          "path": {
+            "description": "Path to the file to read",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "type": "object"
+      },
+      "type": "function"
+    },
+    {
+      "description": "Execute shell commands with real-time streaming of stdout/stderr.",
+      "name": "shell",
+      "parameters": {
+        "properties": {
+          "command": {
+            "description": "Shell command to execute",
+            "type": "string"
+          },
+          "cwd": {
+            "description": "Working directory (optional)",
+            "type": "string"
+          },
+          "timeout": {
+            "description": "Timeout in milliseconds (optional)",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "command"
+        ],
+        "type": "object"
+      },
+      "type": "function"
+    },
+    {
+      "description": "Perform an exact string replacement in a file.",
+      "name": "filesystem_edit",
+      "parameters": {
+        "properties": {
+          "new_string": {
+            "description": "Replacement text",
+            "type": "string"
+          },
+          "old_string": {
+            "description": "Text to replace",
+            "type": "string"
+          },
+          "path": {
+            "description": "Path to the file to edit",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "old_string",
+          "new_string"
+        ],
+        "type": "object"
+      },
+      "type": "function"
+    },
+    {
+      "description": "Find files matching a glob pattern.",
+      "name": "search_glob",
+      "parameters": {
+        "properties": {
+          "max_results": {
+            "description": "Maximum results (optional, default 100)",
+            "type": "integer"
+          },
+          "path": {
+            "description": "Search root path (optional)",
+            "type": "string"
+          },
+          "pattern": {
+            "description": "Glob pattern to match",
+            "type": "string"
+          }
+        },
+        "required": [
+          "pattern"
+        ],
+        "type": "object"
+      },
+      "type": "function"
+    },
+    {
+      "description": "Show environment information (OS, Rust version, etc.).",
+      "name": "diagnostics_env",
+      "parameters": {
+        "properties": {},
+        "required": [],
+        "type": "object"
+      },
+      "type": "function"
+    },
+    {
+      "description": "List running processes.",
+      "name": "process_list",
+      "parameters": {
+        "properties": {
+          "filter": {
+            "description": "Process name filter (optional)",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "type": "function"
+    },
+    {
+      "description": "List entries in a directory.",
+      "name": "directory_list",
+      "parameters": {
+        "properties": {
+          "path": {
+            "description": "Directory path to list",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "type": "object"
+      },
+      "type": "function"
+    },
+    {
+      "description": "Create a directory and all parent directories.",
+      "name": "directory_create",
+      "parameters": {
+        "properties": {
+          "path": {
+            "description": "Directory path to create",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "type": "object"
+      },
+      "type": "function"
+    },
+    {
+      "description": "Uninstall a package using the detected package manager.",
+      "name": "package_uninstall",
+      "parameters": {
+        "properties": {
+          "name": {
+            "description": "Package name to uninstall",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "type": "function"
+    },
+    {
+      "description": "Show commit history.",
+      "name": "git_log",
+      "parameters": {
+        "properties": {
+          "max_count": {
+            "description": "Maximum number of commits (optional)",
+            "type": "integer"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "type": "function"
+    },
+    {
+      "description": "List installed packages using the detected package manager.",
+      "name": "package_list",
+      "parameters": {
+        "properties": {},
+        "required": [],
+        "type": "object"
+      },
+      "type": "function"
+    },
+    {
+      "description": "Install a package using the detected package manager.",
+      "name": "package_install",
+      "parameters": {
+        "properties": {
+          "name": {
+            "description": "Package name to install",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "type": "function"
+    },
+    {
+      "description": "Stage and commit changes.",
+      "name": "git_commit",
+      "parameters": {
+        "properties": {
+          "message": {
+            "description": "Commit message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "type": "object"
+      },
+      "type": "function"
+    },
+    {
+      "description": "Check the health and availability of external tools and dependencies.",
+      "name": "diagnostics_health",
+      "parameters": {
+        "properties": {},
+        "required": [],
+        "type": "object"
+      },
+      "type": "function"
+    },
+    {
+      "description": "Show the working tree status.",
+      "name": "git_status",
+      "parameters": {
+        "properties": {},
+        "required": [],
+        "type": "object"
+      },
+      "type": "function"
+    },
+    {
+      "description": "Delete a file or empty directory.",
+      "name": "filesystem_delete",
+      "parameters": {
+        "properties": {
+          "path": {
+            "description": "Path to delete",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "type": "object"
+      },
+      "type": "function"
+    },
+    {
+      "description": "Write content to a file. Creates parent directories if needed.",
+      "name": "filesystem_write",
+      "parameters": {
+        "properties": {
+          "content": {
+            "description": "Content to write",
+            "type": "string"
+          },
+          "path": {
+            "description": "Path to the file to write",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "content"
+        ],
+        "type": "object"
+      },
+      "type": "function"
+    },
+    {
+      "description": "Terminate a running process by PID.",
+      "name": "process_kill",
+      "parameters": {
+        "properties": {
+          "pid": {
+            "description": "Process ID to kill",
+            "type": "integer"
+          },
+          "signal": {
+            "description": "Signal name: SIGTERM, SIGKILL, SIGINT, SIGHUP, SIGSTOP, SIGCONT (optional, default SIGTERM)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "pid"
+        ],
+        "type": "object"
+      },
+      "type": "function"
+    },
+    {
+      "description": "Show changes in the working tree or between commits.",
+      "name": "git_diff",
+      "parameters": {
+        "properties": {
+          "path": {
+            "description": "File or directory to diff (optional)",
+            "type": "string"
+          },
+          "staged": {
+            "description": "Show staged changes only (optional)",
+            "type": "boolean"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "type": "function"
+    }
+  ]
+}

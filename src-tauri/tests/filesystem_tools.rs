@@ -25,8 +25,9 @@ fn setup_database_with_project(name: &str, root: &PathBuf) -> (Database, String)
     let path = test_database_path(name);
     let _ = fs::remove_file(&path);
     let database = Database::initialize_at(path).expect("initialize database");
-    let project = project_create_from_folder_with_database(&database, &root.display().to_string(), None)
-        .expect("create project");
+    let project =
+        project_create_from_folder_with_database(&database, &root.display().to_string(), None)
+            .expect("create project");
     (database, project.id)
 }
 
@@ -48,17 +49,12 @@ fn filesystem_get_approved_root_returns_project_metadata_value() {
     let root = std::env::temp_dir().join("builderboard-fs-get-root");
     let _ = fs::remove_dir_all(&root);
     fs::create_dir_all(&root).expect("create root");
-    let (database, project_id) = setup_database_with_project(
-        "filesystem-get-approved-root.db",
-        &root,
-    );
+    let (database, project_id) =
+        setup_database_with_project("filesystem-get-approved-root.db", &root);
 
-    let approved_root = filesystem_get_approved_root_with_database(
-        &database,
-        None,
-        Some(&project_id),
-    )
-    .expect("get approved root");
+    let approved_root =
+        filesystem_get_approved_root_with_database(&database, None, Some(&project_id))
+            .expect("get approved root");
 
     assert_eq!(
         approved_root.approved_root.as_deref(),
@@ -87,12 +83,10 @@ fn filesystem_security_rejects_traversal_and_escape() {
         symlink(&outside, root.join("escape")).expect("create symlink");
     }
 
-    let (database, project_id) =
-        setup_database_with_project("filesystem-security.db", &root);
+    let (database, project_id) = setup_database_with_project("filesystem-security.db", &root);
 
     for bad_path in ["../secret", "../../secret", "/etc/passwd", "/Users"] {
-        let read =
-            filesystem_read_file_with_database(&database, None, Some(&project_id), bad_path);
+        let read = filesystem_read_file_with_database(&database, None, Some(&project_id), bad_path);
         assert!(read.is_err(), "expected read failure for {bad_path}");
         let search = filesystem_search_files_with_database(
             &database,
@@ -125,9 +119,8 @@ fn filesystem_local_fixture_operations() {
 
     let (database, project_id) = setup_database_with_project("filesystem-fixture.db", &root);
 
-    let listing =
-        filesystem_list_directory_with_database(&database, None, Some(&project_id), ".")
-            .expect("list");
+    let listing = filesystem_list_directory_with_database(&database, None, Some(&project_id), ".")
+        .expect("list");
     assert!(listing
         .entries
         .iter()
@@ -144,14 +137,9 @@ fn filesystem_local_fixture_operations() {
             .expect("find");
     assert_eq!(ts_files.matches, vec!["src/index.ts".to_string()]);
 
-    let oauth_hits = filesystem_search_files_with_database(
-        &database,
-        None,
-        Some(&project_id),
-        ".",
-        "OAuth",
-    )
-    .expect("search");
+    let oauth_hits =
+        filesystem_search_files_with_database(&database, None, Some(&project_id), ".", "OAuth")
+            .expect("search");
     assert_eq!(oauth_hits.matches.len(), 1);
     assert_eq!(oauth_hits.matches[0].path, "src/index.ts");
 
@@ -169,12 +157,10 @@ fn filesystem_pepfox_validation_scenarios() {
     }
 
     let pepfox_root = PathBuf::from(PEPFOX_ROOT);
-    let (database, project_id) =
-        setup_database_with_project("filesystem-pepfox.db", &pepfox_root);
+    let (database, project_id) = setup_database_with_project("filesystem-pepfox.db", &pepfox_root);
 
-    let listing =
-        filesystem_list_directory_with_database(&database, None, Some(&project_id), ".")
-            .expect("list root");
+    let listing = filesystem_list_directory_with_database(&database, None, Some(&project_id), ".")
+        .expect("list root");
     assert!(
         !listing.entries.is_empty(),
         "root listing should not be empty"
@@ -198,8 +184,7 @@ fn filesystem_pepfox_validation_scenarios() {
     );
 
     for bad_path in ["/etc/passwd", "../../secret", "/Users"] {
-        let read =
-            filesystem_read_file_with_database(&database, None, Some(&project_id), bad_path);
+        let read = filesystem_read_file_with_database(&database, None, Some(&project_id), bad_path);
         assert!(read.is_err(), "expected failure for {bad_path}");
     }
 }

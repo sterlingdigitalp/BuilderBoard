@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
 use std::sync::OnceLock;
 
@@ -8,6 +9,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::auth::CredentialHandle;
+use crate::execution::tool_transport::{
+    native_tool_name_map, NativeToolCall, NativeToolDefinition,
+};
 use crate::models::{Conversation, Message, MessageRole, Model};
 use crate::storage::models::ProviderDto;
 
@@ -30,10 +34,12 @@ pub enum Provider {
     Google,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ProviderRequest {
     pub conversation: Conversation,
     pub reasoning_level: Option<String>,
+    pub native_tools: Vec<NativeToolDefinition>,
+    pub trace_round: Option<u32>,
 }
 
 impl ProviderRequest {
@@ -41,11 +47,23 @@ impl ProviderRequest {
         Self {
             conversation,
             reasoning_level: None,
+            native_tools: vec![],
+            trace_round: None,
         }
     }
 
     pub fn with_reasoning_level(mut self, reasoning_level: Option<String>) -> Self {
         self.reasoning_level = reasoning_level;
+        self
+    }
+
+    pub fn with_native_tools(mut self, native_tools: Vec<NativeToolDefinition>) -> Self {
+        self.native_tools = native_tools;
+        self
+    }
+
+    pub fn with_trace_round(mut self, trace_round: Option<u32>) -> Self {
+        self.trace_round = trace_round;
         self
     }
 }
@@ -56,10 +74,37 @@ pub struct ProviderResponse {
     pub model: Model,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct StreamChunk {
     pub content_delta: String,
     pub is_complete: bool,
+    pub tool_calls: Vec<NativeToolCall>,
+}
+
+impl StreamChunk {
+    fn text(content_delta: impl Into<String>) -> Self {
+        Self {
+            content_delta: content_delta.into(),
+            is_complete: false,
+            tool_calls: vec![],
+        }
+    }
+
+    fn complete() -> Self {
+        Self {
+            content_delta: String::new(),
+            is_complete: true,
+            tool_calls: vec![],
+        }
+    }
+
+    fn tool_call(call: NativeToolCall) -> Self {
+        Self {
+            content_delta: String::new(),
+            is_complete: false,
+            tool_calls: vec![call],
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -345,16 +390,20 @@ impl OpenAIProvider {
     }
 
     fn request_body(request: ProviderRequest, stream: bool) -> serde_json::Value {
-        json!({
+        let native_tools = request.native_tools.clone();
+        let mut body = json!({
             "model": openai_model_name(&request.conversation.model),
             "messages": openai_messages(&request.conversation),
             "stream": stream,
-        })
+        });
+        apply_openai_native_tools(&mut body, &native_tools);
+        body
     }
 
     fn chatgpt_responses_body(request: ProviderRequest, stream: bool) -> serde_json::Value {
         let mut instructions = Vec::new();
         let mut input = Vec::new();
+        let native_tools = request.native_tools.clone();
         for message in &request.conversation.messages {
             match message.role {
                 MessageRole::System => instructions.push(message.content.clone()),
@@ -366,10 +415,9 @@ impl OpenAIProvider {
                     "role": "assistant",
                     "content": [{ "type": "output_text", "text": message.content }],
                 })),
-                MessageRole::Tool => instructions.push(format!(
-                    "Tool result:\n{}",
-                    message.content
-                )),
+                MessageRole::Tool => {
+                    instructions.push(format!("Tool result:\n{}", message.content))
+                }
             }
         }
 
@@ -382,6 +430,7 @@ impl OpenAIProvider {
         if !instructions.is_empty() {
             body["instructions"] = json!(instructions.join("\n"));
         }
+        apply_responses_native_tools(&mut body, &native_tools);
         body
     }
 
@@ -403,11 +452,16 @@ impl OpenAIProvider {
                 };
                 let endpoint = self.chat_completions_url();
                 trace_provider_adapter("api_key", &endpoint, &model_id);
+                let trace_round = request.trace_round;
+                let body = Self::request_body(request, stream);
+                if let Some(round) = trace_round {
+                    crate::native_tool_trace::write_request(round, &body);
+                }
                 self.blocking_http_client()
                     .post(endpoint)
                     .bearer_auth(api_key)
                     .header(reqwest::header::CONTENT_TYPE, "application/json")
-                    .json(&Self::request_body(request, stream))
+                    .json(&body)
             }
             Some(OpenAIAuth::ChatGptOAuth { .. }) => {
                 let (access_token, account_id) = match self.chatgpt_auth() {
@@ -420,13 +474,18 @@ impl OpenAIProvider {
                 };
                 let endpoint = self.chatgpt_responses_url();
                 trace_provider_adapter("oauth", &endpoint, &model_id);
+                let trace_round = request.trace_round;
+                let body = Self::chatgpt_responses_body(request, stream);
+                if let Some(round) = trace_round {
+                    crate::native_tool_trace::write_request(round, &body);
+                }
                 let mut builder = self
                     .blocking_http_client()
                     .post(endpoint)
                     .bearer_auth(access_token)
                     .header(reqwest::header::CONTENT_TYPE, "application/json")
                     .header("originator", "opencode")
-                    .json(&Self::chatgpt_responses_body(request, stream));
+                    .json(&body);
                 if let Some(account_id) = account_id {
                     builder = builder.header("ChatGPT-Account-Id", account_id);
                 }
@@ -478,23 +537,33 @@ impl OpenAIProvider {
                 let api_key = self.api_key()?;
                 let endpoint = self.chat_completions_url();
                 trace_provider_adapter("api_key", &endpoint, &model_id);
+                let trace_round = request.trace_round;
+                let body = Self::request_body(request, stream);
+                if let Some(round) = trace_round {
+                    crate::native_tool_trace::write_request(round, &body);
+                }
                 self.async_client
                     .post(endpoint)
                     .bearer_auth(api_key)
                     .header(reqwest::header::CONTENT_TYPE, "application/json")
-                    .json(&Self::request_body(request, stream))
+                    .json(&body)
             }
             Some(OpenAIAuth::ChatGptOAuth { .. }) => {
                 let (access_token, account_id) = self.chatgpt_auth()?;
                 let endpoint = self.chatgpt_responses_url();
                 trace_provider_adapter("oauth", &endpoint, &model_id);
+                let trace_round = request.trace_round;
+                let body = Self::chatgpt_responses_body(request, stream);
+                if let Some(round) = trace_round {
+                    crate::native_tool_trace::write_request(round, &body);
+                }
                 let mut builder = self
                     .async_client
                     .post(endpoint)
                     .bearer_auth(access_token)
                     .header(reqwest::header::CONTENT_TYPE, "application/json")
                     .header("originator", "opencode")
-                    .json(&Self::chatgpt_responses_body(request, stream));
+                    .json(&body);
                 if let Some(account_id) = account_id {
                     builder = builder.header("ChatGPT-Account-Id", account_id);
                 }
@@ -519,7 +588,10 @@ impl OpenAIProvider {
         trace_openai_response_status(response.status().as_u16());
         if !response.status().is_success() {
             let status = response.status().as_u16();
-            let message = response.text().await.unwrap_or_else(|error| error.to_string());
+            let message = response
+                .text()
+                .await
+                .unwrap_or_else(|error| error.to_string());
             return Err(ProviderError::Http {
                 status: Some(status),
                 message,
@@ -537,10 +609,14 @@ impl OpenAIProvider {
     where
         F: FnMut(ProviderResult<StreamChunk>) -> ProviderResult<()>,
     {
+        let trace_round = request.trace_round;
+        let native_tool_name_map = native_tool_name_map(&request.native_tools);
         let response = self.send_request_async(request, true).await?;
         let is_oauth = self.is_chatgpt_oauth();
         let mut byte_stream = response.bytes_stream();
         let mut pending = String::new();
+        let mut chat_tool_calls: HashMap<u64, PartialNativeToolCall> = HashMap::new();
+        let mut responses_tool_calls: HashMap<String, PartialNativeToolCall> = HashMap::new();
 
         while let Some(next_bytes) = byte_stream.next().await {
             let bytes = next_bytes.map_err(|error| ProviderError::Http {
@@ -550,7 +626,20 @@ impl OpenAIProvider {
             pending.push_str(&String::from_utf8_lossy(&bytes));
 
             while let Some(line) = take_sse_line(&mut pending) {
-                if let Some(chunk) = parse_sse_line(line.as_str(), is_oauth) {
+                if let Some(round) = trace_round {
+                    crate::native_tool_trace::append_provider_event(
+                        round,
+                        provider_stream_trace_event(line.as_str(), is_oauth),
+                    );
+                }
+                let events = parse_sse_line(
+                    line.as_str(),
+                    is_oauth,
+                    &native_tool_name_map,
+                    &mut chat_tool_calls,
+                    &mut responses_tool_calls,
+                );
+                for chunk in events {
                     on_chunk(chunk)?;
                 }
             }
@@ -574,21 +663,135 @@ fn take_sse_line(buffer: &mut String) -> Option<String> {
     Some(line)
 }
 
-fn parse_sse_line(line: &str, is_oauth: bool) -> Option<ProviderResult<StreamChunk>> {
+#[derive(Clone, Debug, Default)]
+struct PartialNativeToolCall {
+    call_id: String,
+    name: String,
+    arguments: String,
+}
+
+fn apply_openai_native_tools(body: &mut serde_json::Value, tools: &[NativeToolDefinition]) {
+    if tools.is_empty() {
+        return;
+    }
+
+    body["tools"] = json!(tools
+        .iter()
+        .map(|tool| {
+            json!({
+                "type": "function",
+                "function": {
+                    "name": tool.name,
+                    "description": tool.description,
+                    "parameters": tool.parameters,
+                }
+            })
+        })
+        .collect::<Vec<_>>());
+    body["tool_choice"] = json!("auto");
+}
+
+fn apply_responses_native_tools(body: &mut serde_json::Value, tools: &[NativeToolDefinition]) {
+    if tools.is_empty() {
+        return;
+    }
+
+    body["tools"] = json!(tools
+        .iter()
+        .map(|tool| {
+            json!({
+                "type": "function",
+                "name": tool.name,
+                "description": tool.description,
+                "parameters": tool.parameters,
+            })
+        })
+        .collect::<Vec<_>>());
+    body["tool_choice"] = json!("auto");
+}
+
+fn provider_stream_trace_event(line: &str, is_oauth: bool) -> serde_json::Value {
+    let data = line.trim().strip_prefix("data: ").unwrap_or(line.trim());
+    let parsed = serde_json::from_str::<serde_json::Value>(data).ok();
+    let mut event = json!({
+        "raw_line": line,
+        "transport": if is_oauth { "responses" } else { "chat_completions" },
+        "raw_data": data,
+    });
+
+    if let Some(parsed) = parsed {
+        event["parsed"] = parsed.clone();
+        if is_oauth {
+            event["type"] = parsed.get("type").cloned().unwrap_or_else(|| json!(null));
+            event["content_delta"] = parsed.get("delta").cloned().unwrap_or_else(|| json!(null));
+            if let Some(item) = parsed.get("item") {
+                event["tool_call_id"] = item
+                    .get("call_id")
+                    .or_else(|| item.get("id"))
+                    .cloned()
+                    .unwrap_or_else(|| json!(null));
+                event["function_name"] = item.get("name").cloned().unwrap_or_else(|| json!(null));
+                event["arguments"] = item
+                    .get("arguments")
+                    .cloned()
+                    .unwrap_or_else(|| json!(null));
+            }
+        } else if let Some(choice) = parsed
+            .get("choices")
+            .and_then(|value| value.as_array())
+            .and_then(|choices| choices.first())
+        {
+            event["type"] = json!("chat.completion.chunk");
+            event["finish_reason"] = choice
+                .get("finish_reason")
+                .cloned()
+                .unwrap_or_else(|| json!(null));
+            if let Some(delta) = choice.get("delta") {
+                event["content_delta"] =
+                    delta.get("content").cloned().unwrap_or_else(|| json!(null));
+                event["tool_call_delta"] = delta
+                    .get("tool_calls")
+                    .cloned()
+                    .unwrap_or_else(|| json!(null));
+            }
+        }
+    } else if data == "[DONE]" {
+        event["type"] = json!("done");
+    } else {
+        event["type"] = json!("unparsed");
+    }
+
+    event
+}
+
+fn parse_sse_line(
+    line: &str,
+    is_oauth: bool,
+    tool_name_map: &HashMap<String, String>,
+    chat_tool_calls: &mut HashMap<u64, PartialNativeToolCall>,
+    responses_tool_calls: &mut HashMap<String, PartialNativeToolCall>,
+) -> Vec<ProviderResult<StreamChunk>> {
     let line = line.trim();
     if line.is_empty() || line.starts_with(':') || line.starts_with("event: ") {
-        return None;
+        return vec![];
     }
-    let data = line.strip_prefix("data: ")?;
+    let Some(data) = line.strip_prefix("data: ") else {
+        return vec![];
+    };
     if data == "[DONE]" {
-        return Some(Ok(StreamChunk {
-            content_delta: String::new(),
-            is_complete: true,
-        }));
+        let mut chunks = if is_oauth {
+            drain_responses_tool_calls(responses_tool_calls, tool_name_map)
+        } else {
+            drain_chat_tool_calls(chat_tool_calls, tool_name_map)
+        };
+        chunks.push(Ok(StreamChunk::complete()));
+        return chunks;
     }
 
     if is_oauth {
-        let event = serde_json::from_str::<serde_json::Value>(data).ok()?;
+        let Ok(event) = serde_json::from_str::<serde_json::Value>(data) else {
+            return vec![];
+        };
         match event.get("type").and_then(|value| value.as_str()) {
             Some("response.output_text.delta") => {
                 let content_delta = event
@@ -597,31 +800,55 @@ fn parse_sse_line(line: &str, is_oauth: bool) -> Option<ProviderResult<StreamChu
                     .unwrap_or_default()
                     .to_string();
                 if content_delta.is_empty() {
-                    None
+                    vec![]
                 } else {
-                    Some(Ok(StreamChunk {
-                        content_delta,
-                        is_complete: false,
-                    }))
+                    vec![Ok(StreamChunk::text(content_delta))]
                 }
             }
-            Some("response.completed") => Some(Ok(StreamChunk {
-                content_delta: String::new(),
-                is_complete: true,
-            })),
-            Some("error") => Some(Err(ProviderError::InvalidResponse {
+            Some("response.output_item.added") | Some("response.output_item.done") => {
+                record_responses_tool_item(&event, responses_tool_calls);
+                if event.get("type").and_then(|value| value.as_str())
+                    == Some("response.output_item.done")
+                {
+                    drain_responses_tool_calls(responses_tool_calls, tool_name_map)
+                } else {
+                    vec![]
+                }
+            }
+            Some("response.function_call_arguments.delta") => {
+                record_responses_tool_arguments_delta(&event, responses_tool_calls);
+                vec![]
+            }
+            Some("response.completed") => {
+                let mut chunks = drain_responses_tool_calls(responses_tool_calls, tool_name_map);
+                chunks.push(Ok(StreamChunk::complete()));
+                chunks
+            }
+            Some("error") => vec![Err(ProviderError::InvalidResponse {
                 message: event.to_string(),
-            })),
-            _ => None,
+            })],
+            _ => vec![],
         }
     } else {
-        let event = serde_json::from_str::<serde_json::Value>(data).ok()?;
-        let choice = event.get("choices")?.as_array()?.first()?;
-        if choice.get("finish_reason").and_then(|value| value.as_str()).is_some() {
-            return Some(Ok(StreamChunk {
-                content_delta: String::new(),
-                is_complete: true,
-            }));
+        let Ok(event) = serde_json::from_str::<serde_json::Value>(data) else {
+            return vec![];
+        };
+        let Some(choice) = event
+            .get("choices")
+            .and_then(|value| value.as_array())
+            .and_then(|choices| choices.first())
+        else {
+            return vec![];
+        };
+        record_chat_tool_deltas(choice, chat_tool_calls);
+        if choice
+            .get("finish_reason")
+            .and_then(|value| value.as_str())
+            .is_some()
+        {
+            let mut chunks = drain_chat_tool_calls(chat_tool_calls, tool_name_map);
+            chunks.push(Ok(StreamChunk::complete()));
+            return chunks;
         }
         let content_delta = choice
             .get("delta")
@@ -630,14 +857,141 @@ fn parse_sse_line(line: &str, is_oauth: bool) -> Option<ProviderResult<StreamChu
             .unwrap_or_default()
             .to_string();
         if content_delta.is_empty() {
-            None
+            vec![]
         } else {
-            Some(Ok(StreamChunk {
-                content_delta,
-                is_complete: false,
-            }))
+            vec![Ok(StreamChunk::text(content_delta))]
         }
     }
+}
+
+fn record_chat_tool_deltas(
+    choice: &serde_json::Value,
+    calls: &mut HashMap<u64, PartialNativeToolCall>,
+) {
+    let Some(tool_calls) = choice
+        .get("delta")
+        .and_then(|delta| delta.get("tool_calls"))
+        .and_then(|value| value.as_array())
+    else {
+        return;
+    };
+
+    for call in tool_calls {
+        let index = call
+            .get("index")
+            .and_then(|value| value.as_u64())
+            .unwrap_or(0);
+        let entry = calls.entry(index).or_default();
+        if let Some(id) = call.get("id").and_then(|value| value.as_str()) {
+            entry.call_id = id.to_string();
+        }
+        if let Some(function) = call.get("function") {
+            if let Some(name) = function.get("name").and_then(|value| value.as_str()) {
+                entry.name.push_str(name);
+            }
+            if let Some(arguments) = function.get("arguments").and_then(|value| value.as_str()) {
+                entry.arguments.push_str(arguments);
+            }
+        }
+    }
+}
+
+fn record_responses_tool_item(
+    event: &serde_json::Value,
+    calls: &mut HashMap<String, PartialNativeToolCall>,
+) {
+    let Some(item) = event.get("item") else {
+        return;
+    };
+    if item.get("type").and_then(|value| value.as_str()) != Some("function_call") {
+        return;
+    }
+
+    let item_id = item
+        .get("id")
+        .or_else(|| item.get("call_id"))
+        .and_then(|value| value.as_str())
+        .unwrap_or("tool_call")
+        .to_string();
+    let entry = calls.entry(item_id.clone()).or_default();
+    entry.call_id = item
+        .get("call_id")
+        .and_then(|value| value.as_str())
+        .unwrap_or(&item_id)
+        .to_string();
+    if let Some(name) = item.get("name").and_then(|value| value.as_str()) {
+        entry.name = name.to_string();
+    }
+    if let Some(arguments) = item.get("arguments").and_then(|value| value.as_str()) {
+        entry.arguments = arguments.to_string();
+    }
+}
+
+fn record_responses_tool_arguments_delta(
+    event: &serde_json::Value,
+    calls: &mut HashMap<String, PartialNativeToolCall>,
+) {
+    let Some(delta) = event.get("delta").and_then(|value| value.as_str()) else {
+        return;
+    };
+    let item_id = event
+        .get("item_id")
+        .or_else(|| event.get("call_id"))
+        .and_then(|value| value.as_str())
+        .unwrap_or("tool_call")
+        .to_string();
+    calls.entry(item_id).or_default().arguments.push_str(delta);
+}
+
+fn drain_chat_tool_calls(
+    calls: &mut HashMap<u64, PartialNativeToolCall>,
+    tool_name_map: &HashMap<String, String>,
+) -> Vec<ProviderResult<StreamChunk>> {
+    let mut indexes: Vec<u64> = calls.keys().cloned().collect();
+    indexes.sort_unstable();
+    indexes
+        .into_iter()
+        .filter_map(|index| calls.remove(&index))
+        .filter_map(|call| native_call_from_partial(call, tool_name_map))
+        .map(|call| Ok(StreamChunk::tool_call(call)))
+        .collect()
+}
+
+fn drain_responses_tool_calls(
+    calls: &mut HashMap<String, PartialNativeToolCall>,
+    tool_name_map: &HashMap<String, String>,
+) -> Vec<ProviderResult<StreamChunk>> {
+    let mut keys: Vec<String> = calls.keys().cloned().collect();
+    keys.sort();
+    keys.into_iter()
+        .filter_map(|key| calls.remove(&key))
+        .filter_map(|call| native_call_from_partial(call, tool_name_map))
+        .map(|call| Ok(StreamChunk::tool_call(call)))
+        .collect()
+}
+
+fn native_call_from_partial(
+    call: PartialNativeToolCall,
+    tool_name_map: &HashMap<String, String>,
+) -> Option<NativeToolCall> {
+    if call.name.trim().is_empty() {
+        return None;
+    }
+    let tool_name = tool_name_map.get(&call.name).cloned().unwrap_or(call.name);
+    let arguments = if call.arguments.trim().is_empty() {
+        json!({})
+    } else {
+        serde_json::from_str(&call.arguments).unwrap_or_else(|_| json!({ "_raw": call.arguments }))
+    };
+    Some(NativeToolCall {
+        call_id: if call.call_id.trim().is_empty() {
+            format!("call_{}", tool_name.replace('.', "_"))
+        } else {
+            call.call_id
+        },
+        tool_name,
+        arguments,
+    })
 }
 
 fn trace_provider_adapter(auth_type: &str, endpoint: &str, model_id: &str) {
@@ -912,10 +1266,7 @@ impl Iterator for OpenAIStream {
             };
             if data == "[DONE]" {
                 self.done = true;
-                return Some(Ok(StreamChunk {
-                    content_delta: String::new(),
-                    is_complete: true,
-                }));
+                return Some(Ok(StreamChunk::complete()));
             }
 
             let event = match serde_json::from_str::<OpenAIStreamResponse>(data) {
@@ -931,16 +1282,10 @@ impl Iterator for OpenAIStream {
             if let Some(choice) = event.choices.into_iter().next() {
                 if choice.finish_reason.is_some() {
                     self.done = true;
-                    return Some(Ok(StreamChunk {
-                        content_delta: String::new(),
-                        is_complete: true,
-                    }));
+                    return Some(Ok(StreamChunk::complete()));
                 }
                 if let Some(content_delta) = choice.delta.content {
-                    return Some(Ok(StreamChunk {
-                        content_delta,
-                        is_complete: false,
-                    }));
+                    return Some(Ok(StreamChunk::text(content_delta)));
                 }
             }
         }
@@ -978,10 +1323,7 @@ impl Iterator for OpenAIResponsesStream {
             };
             if data == "[DONE]" {
                 self.done = true;
-                return Some(Ok(StreamChunk {
-                    content_delta: String::new(),
-                    is_complete: true,
-                }));
+                return Some(Ok(StreamChunk::complete()));
             }
 
             let event = match serde_json::from_str::<serde_json::Value>(data) {
@@ -1002,18 +1344,12 @@ impl Iterator for OpenAIResponsesStream {
                         .unwrap_or_default()
                         .to_string();
                     if !content_delta.is_empty() {
-                        return Some(Ok(StreamChunk {
-                            content_delta,
-                            is_complete: false,
-                        }));
+                        return Some(Ok(StreamChunk::text(content_delta)));
                     }
                 }
                 Some("response.completed") => {
                     self.done = true;
-                    return Some(Ok(StreamChunk {
-                        content_delta: String::new(),
-                        is_complete: true,
-                    }));
+                    return Some(Ok(StreamChunk::complete()));
                 }
                 Some("error") => {
                     self.done = true;
@@ -1092,6 +1428,7 @@ mod tests {
         resolve_provider_for_registry_entry, AnthropicProvider, GoogleProvider, LLMProvider,
         OpenAIProvider, ProviderError,
     };
+    use crate::execution::tool_transport::NativeToolDefinition;
     use crate::models::{Conversation, Message, MessageRole, Model};
     use crate::providers::ProviderRequest;
     use crate::storage::models::ProviderDto;
@@ -1186,6 +1523,80 @@ mod tests {
         assert!(chunks[2].is_complete);
         let request = request_rx.recv().expect("server should capture request");
         assert!(request.contains(r#""stream":true"#));
+    }
+
+    #[test]
+    fn openai_request_includes_native_tool_definitions() {
+        let (base_url, request_rx) = spawn_openai_server(
+            "HTTP/1.1 200 OK",
+            "application/json",
+            r#"{"choices":[{"message":{"content":"Ready"}}]}"#,
+        );
+        let provider = OpenAIProvider::with_base_url_for_test("sk-test", base_url);
+        let native_tools = vec![NativeToolDefinition {
+            name: "filesystem_write".to_string(),
+            tool_id: "filesystem.write".to_string(),
+            description: "Write a file".to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string" },
+                    "content": { "type": "string" }
+                },
+                "required": ["path", "content"]
+            }),
+        }];
+
+        provider
+            .send(ProviderRequest::new(openai_hello_conversation()).with_native_tools(native_tools))
+            .expect("OpenAI send should include native tool definitions");
+
+        let request = request_rx.recv().expect("server should capture request");
+        assert!(request.contains(r#""tools":["#));
+        assert!(request.contains(r#""type":"function""#));
+        assert!(request.contains(r#""name":"filesystem_write""#));
+        assert!(request.contains(r#""tool_choice":"auto""#));
+        assert!(!request.contains("tool_call"));
+    }
+
+    #[test]
+    fn openai_async_stream_emits_native_tool_call_chunk() {
+        let body = concat!(
+            "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-1\",\"type\":\"function\",\"function\":{\"name\":\"filesystem_write\",\"arguments\":\"{\\\"path\\\":\"}}]},\"finish_reason\":null}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\\\"tmp/native.txt\\\",\\\"content\\\":\\\"hello\\\"}\"}}]},\"finish_reason\":null}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n",
+            "data: [DONE]\n\n",
+        );
+        let (base_url, _request_rx) =
+            spawn_openai_server("HTTP/1.1 200 OK", "text/event-stream", body);
+        let provider = OpenAIProvider::with_base_url_for_test("sk-test", base_url);
+        let native_tools = vec![NativeToolDefinition {
+            name: "filesystem_write".to_string(),
+            tool_id: "filesystem.write".to_string(),
+            description: "Write a file".to_string(),
+            parameters: serde_json::json!({ "type": "object", "properties": {}, "required": [] }),
+        }];
+        let mut chunks = Vec::new();
+
+        tauri::async_runtime::block_on(provider.stream_chunks_async(
+            ProviderRequest::new(openai_hello_conversation()).with_native_tools(native_tools),
+            |chunk| {
+                chunks.push(chunk?);
+                Ok(())
+            },
+        ))
+        .expect("OpenAI async stream should parse native tool call");
+
+        let tool_call = chunks
+            .iter()
+            .flat_map(|chunk| chunk.tool_calls.iter())
+            .next()
+            .expect("native tool call should be emitted");
+        assert_eq!(tool_call.call_id, "call-1");
+        assert_eq!(tool_call.tool_name, "filesystem.write");
+        assert_eq!(tool_call.arguments["path"], "tmp/native.txt");
+        assert_eq!(tool_call.arguments["content"], "hello");
+        assert!(chunks.iter().any(|chunk| chunk.is_complete));
     }
 
     #[test]

@@ -14,12 +14,12 @@ pub use commands::{
     filesystem_search_files_with_database, filesystem_set_approved_root_with_database,
 };
 pub use error::FilesystemError;
+pub use ignore::{is_default_ignored_dir, DEFAULT_IGNORED_DIRS};
 pub use models::{
     ApprovedRootResult, DirectoryEntryDto, FindFilesResult, ListDirectoryResult, ReadFileResult,
     SearchFilesResult,
 };
-pub use scope::ApprovedScope;
-pub use ignore::{is_default_ignored_dir, DEFAULT_IGNORED_DIRS};
 pub use perf::{trace_perf_metric, PerfSpan};
 pub use scan_context::ScanContext;
+pub use scope::ApprovedScope;
 pub use service::FilesystemService;

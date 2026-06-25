@@ -31,12 +31,9 @@ fn create_project(database: &Database, parent: &PathBuf, name: &str) -> StorageR
     if name == "Arete" {
         fs::write(folder.join("package.json"), r#"{"name":"arete"}"#)?;
     }
-    let project = project_create_from_folder_with_database(
-        database,
-        &folder.display().to_string(),
-        None,
-    )
-    .map_err(|error| StorageError::InvalidInput(error))?;
+    let project =
+        project_create_from_folder_with_database(database, &folder.display().to_string(), None)
+            .map_err(|error| StorageError::InvalidInput(error))?;
     Ok(project.id)
 }
 
@@ -133,8 +130,7 @@ fn messages_do_not_leak_across_panes() -> StorageResult<()> {
     db.with_connection(|connection| {
         let pepfox_messages =
             MessageRepository::list_for_pane(connection, &fixture.pepfox_pane_id)?;
-        let arete_messages =
-            MessageRepository::list_for_pane(connection, &fixture.arete_pane_id)?;
+        let arete_messages = MessageRepository::list_for_pane(connection, &fixture.arete_pane_id)?;
 
         assert_eq!(pepfox_messages.len(), 1);
         assert_eq!(pepfox_messages[0].content, "pepfox-message");

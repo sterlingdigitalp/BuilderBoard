@@ -21,8 +21,8 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::time::timeout;
 
-use crate::execution::event::ExecutionEvent;
 use crate::execution::engine::ExecutionError;
+use crate::execution::event::ExecutionEvent;
 
 /// Configuration for launching a CLI process.
 #[derive(Clone, Debug)]
@@ -70,15 +70,16 @@ impl CLIExecutionEngine {
             cmd.env(k, v);
         }
 
-        let mut child: Child = cmd
-            .spawn()
-            .map_err(|e| ExecutionError::Internal {
-                message: format!("failed to spawn {}: {}", config.program, e),
-            })?;
-
-        let stdout = child.stdout.take().ok_or_else(|| ExecutionError::Internal {
-            message: "failed to capture stdout".to_string(),
+        let mut child: Child = cmd.spawn().map_err(|e| ExecutionError::Internal {
+            message: format!("failed to spawn {}: {}", config.program, e),
         })?;
+
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| ExecutionError::Internal {
+                message: "failed to capture stdout".to_string(),
+            })?;
 
         let stderr = child.stderr.take();
 
@@ -113,7 +114,9 @@ impl CLIExecutionEngine {
                 if let Some(flag) = &cancel_flag {
                     if flag.load(Ordering::SeqCst) {
                         let _ = child.kill().await;
-                        on_event(ExecutionEvent::Cancelled { reason: Some("user cancelled".into()) });
+                        on_event(ExecutionEvent::Cancelled {
+                            reason: Some("user cancelled".into()),
+                        });
                         break;
                     }
                 }

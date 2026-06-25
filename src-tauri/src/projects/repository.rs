@@ -87,7 +87,10 @@ impl ProjectRepository {
         Ok(project.approved_root)
     }
 
-    pub fn load_scope(connection: &Connection, project_id: &str) -> FilesystemResult<ApprovedScope> {
+    pub fn load_scope(
+        connection: &Connection,
+        project_id: &str,
+    ) -> FilesystemResult<ApprovedScope> {
         let approved_root = Self::get_approved_root(connection, project_id)
             .map_err(|error| FilesystemError::InvalidInput(error.to_string()))?;
         ApprovedScope::new(approved_root)
@@ -207,13 +210,8 @@ impl ProjectRepository {
             }
         }
 
-        project_from_metadata(
-            &workspace.id,
-            &project_name,
-            Some(&metadata_json),
-            true,
-        )
-        .ok_or_else(|| StorageError::InvalidInput("failed to build project dto".to_string()))
+        project_from_metadata(&workspace.id, &project_name, Some(&metadata_json), true)
+            .ok_or_else(|| StorageError::InvalidInput("failed to build project dto".to_string()))
     }
 
     pub fn switch(connection: &Connection, project_id: &str) -> StorageResult<ProjectDto> {
@@ -276,7 +274,9 @@ mod tests {
 
         assert_eq!(project.name, root.file_name().unwrap().to_str().unwrap());
         assert!(!project.code.is_empty());
-        assert!(project.approved_root.contains("builderboard-project-create"));
+        assert!(project
+            .approved_root
+            .contains("builderboard-project-create"));
         assert!(project.is_active);
 
         let listed = database.with_connection(ProjectRepository::list)?;

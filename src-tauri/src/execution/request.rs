@@ -4,6 +4,7 @@
 //! so that future engines (Grok, Claude, local, image, embedding, skills, voice)
 //! can be routed without changing the core boundary.
 
+use crate::execution::tool_transport::NativeToolDefinition;
 use crate::models::{Conversation, Model};
 
 /// Chat-style request (current primary use case for OpenAI compatibility).
@@ -11,7 +12,9 @@ use crate::models::{Conversation, Model};
 pub struct ChatRequest {
     pub conversation: Conversation,
     pub reasoning_level: Option<String>,
-    // Future: tools, temperature, etc. without changing the enum variant.
+    pub native_tools: Vec<NativeToolDefinition>,
+    pub trace_round: Option<u32>,
+    // Future: temperature, etc. without changing the enum variant.
 }
 
 /// Simple completion (non-chat).
@@ -78,6 +81,35 @@ impl ExecutionRequest {
         Self::Chat(ChatRequest {
             conversation,
             reasoning_level,
+            native_tools: vec![],
+            trace_round: None,
+        })
+    }
+
+    pub fn chat_with_native_tools(
+        conversation: Conversation,
+        reasoning_level: Option<String>,
+        native_tools: Vec<NativeToolDefinition>,
+    ) -> Self {
+        Self::Chat(ChatRequest {
+            conversation,
+            reasoning_level,
+            native_tools,
+            trace_round: None,
+        })
+    }
+
+    pub fn chat_with_native_tools_for_round(
+        conversation: Conversation,
+        reasoning_level: Option<String>,
+        native_tools: Vec<NativeToolDefinition>,
+        trace_round: u32,
+    ) -> Self {
+        Self::Chat(ChatRequest {
+            conversation,
+            reasoning_level,
+            native_tools,
+            trace_round: Some(trace_round),
         })
     }
 

@@ -23,8 +23,11 @@ pub fn filesystem_set_approved_root(
     workspace_id: Option<String>,
     path: String,
 ) -> Result<String, String> {
-    let resolved =
-        filesystem_set_approved_root_with_database(database.inner(), workspace_id.as_deref(), &path)?;
+    let resolved = filesystem_set_approved_root_with_database(
+        database.inner(),
+        workspace_id.as_deref(),
+        &path,
+    )?;
     scope_cache.invalidate_all();
     Ok(resolved)
 }
@@ -60,7 +63,8 @@ pub fn filesystem_get_approved_root_with_database(
     database
         .with_connection(|connection| {
             let resolved_project_id = resolve_project_id(connection, workspace_id, project_id)?;
-            let approved_root = ProjectRepository::get_approved_root(connection, &resolved_project_id)?;
+            let approved_root =
+                ProjectRepository::get_approved_root(connection, &resolved_project_id)?;
             Ok(ApprovedRootResult {
                 workspace_id: resolved_project_id.clone(),
                 approved_root: Some(approved_root),

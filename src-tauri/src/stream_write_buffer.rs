@@ -25,11 +25,7 @@ impl StreamWriteBuffer {
         }
     }
 
-    pub fn push<R: Runtime>(
-        &self,
-        app: &AppHandle<R>,
-        delta: &str,
-    ) -> Result<(), StorageError> {
+    pub fn push<R: Runtime>(&self, app: &AppHandle<R>, delta: &str) -> Result<(), StorageError> {
         if delta.is_empty() {
             return Ok(());
         }

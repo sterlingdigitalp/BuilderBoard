@@ -8,9 +8,7 @@ use builderboard_lib::storage::models::{CreatePaneRequest, SHELL_WORKSPACE_ID};
 use builderboard_lib::storage::repositories::panes::PaneRepository;
 
 fn temp_database(name: &str) -> Database {
-    let path = std::env::temp_dir()
-        .join("builderboard-tests")
-        .join(name);
+    let path = std::env::temp_dir().join("builderboard-tests").join(name);
     let _ = fs::remove_file(&path);
     Database::initialize_at(path).expect("initialize database")
 }
@@ -25,7 +23,9 @@ fn invalid_project_id_fails_filesystem_lookup_safely() {
         "package.json",
     );
 
-    let err = result.expect_err("invalid project should fail").to_lowercase();
+    let err = result
+        .expect_err("invalid project should fail")
+        .to_lowercase();
     assert!(
         err.contains("not found") || err.contains("project"),
         "expected project lookup failure, got: {err}"
@@ -135,6 +135,7 @@ fn closed_pane_cannot_be_reopened_by_get_open_by_id() {
         })
         .expect("create and close pane");
 
-    let result = database.with_connection(|connection| PaneRepository::get_open_by_id(connection, &pane_id));
+    let result =
+        database.with_connection(|connection| PaneRepository::get_open_by_id(connection, &pane_id));
     assert!(result.is_err());
 }

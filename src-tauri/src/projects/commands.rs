@@ -18,7 +18,9 @@ pub fn project_list_from_database(database: &Database) -> Result<Vec<ProjectDto>
 }
 
 #[tauri::command]
-pub fn project_get_active(database: State<'_, Arc<Database>>) -> Result<Option<ProjectDto>, String> {
+pub fn project_get_active(
+    database: State<'_, Arc<Database>>,
+) -> Result<Option<ProjectDto>, String> {
     project_get_active_from_database(database.inner())
 }
 

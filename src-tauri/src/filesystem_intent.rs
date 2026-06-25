@@ -61,7 +61,9 @@ pub fn route_filesystem_tools(prompt: &str) -> RoutedFilesystemTools {
         }];
         let routed = RoutedFilesystemTools {
             intents: vec![ReviewIntent::FilesystemDiscovery],
-            bundle_label: ReviewIntent::FilesystemDiscovery.telemetry_label().to_string(),
+            bundle_label: ReviewIntent::FilesystemDiscovery
+                .telemetry_label()
+                .to_string(),
             tools,
         };
         trace_intent_routing(&routed);
@@ -210,8 +212,12 @@ fn build_bundle_for_intents(
         match intent {
             ReviewIntent::SecurityReview => extend_security_bundle(&mut tools),
             ReviewIntent::TechnicalDebtReview => extend_technical_debt_bundle(&mut tools),
-            ReviewIntent::ProductionReadinessReview => extend_production_readiness_bundle(&mut tools),
-            ReviewIntent::FilesystemDiscovery => extend_filesystem_discovery_bundle(&mut tools, lower),
+            ReviewIntent::ProductionReadinessReview => {
+                extend_production_readiness_bundle(&mut tools)
+            }
+            ReviewIntent::FilesystemDiscovery => {
+                extend_filesystem_discovery_bundle(&mut tools, lower)
+            }
             ReviewIntent::ArchitectureReview
             | ReviewIntent::CodeQualityReview
             | ReviewIntent::ProjectOverview => {}
@@ -240,7 +246,13 @@ fn extend_architecture_bundle(tools: &mut Vec<FilesystemToolCall>) {
 
 fn extend_security_bundle(tools: &mut Vec<FilesystemToolCall>) {
     for query in [
-        "auth", "oauth", "token", "credential", "secret", "password", "key",
+        "auth",
+        "oauth",
+        "token",
+        "credential",
+        "secret",
+        "password",
+        "key",
     ] {
         push_search_files(tools, ".", query);
     }
@@ -322,7 +334,11 @@ fn trace_intent_routing(routed: &RoutedFilesystemTools) {
     println!("INTENT_BUNDLE={}", routed.bundle_label);
     println!(
         "FILESYSTEM_ROUTER_MATCHED={}",
-        if routed.tools.is_empty() { "false" } else { "true" }
+        if routed.tools.is_empty() {
+            "false"
+        } else {
+            "true"
+        }
     );
     let tool_names = routed
         .tools
@@ -351,9 +367,17 @@ mod tests {
     #[test]
     fn production_readiness_review_triggers_filesystem_tools() {
         let routed = route_filesystem_tools("Perform a production readiness review");
-        assert!(routed.intents.contains(&ReviewIntent::ProductionReadinessReview));
-        assert!(has_tool("Perform a production readiness review", "list_directory"));
-        assert!(has_tool("Perform a production readiness review", "read_file"));
+        assert!(routed
+            .intents
+            .contains(&ReviewIntent::ProductionReadinessReview));
+        assert!(has_tool(
+            "Perform a production readiness review",
+            "list_directory"
+        ));
+        assert!(has_tool(
+            "Perform a production readiness review",
+            "read_file"
+        ));
     }
 
     #[test]
@@ -425,7 +449,10 @@ mod tests {
             ("Identify technical debt", ReviewIntent::TechnicalDebtReview),
             ("Review maintainability", ReviewIntent::TechnicalDebtReview),
             ("Review scalability", ReviewIntent::CodeQualityReview),
-            ("Review implementation risks", ReviewIntent::CodeQualityReview),
+            (
+                "Review implementation risks",
+                ReviewIntent::CodeQualityReview,
+            ),
             ("Review onboarding", ReviewIntent::CodeQualityReview),
         ];
 

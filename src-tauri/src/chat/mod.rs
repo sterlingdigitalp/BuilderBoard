@@ -1,14 +1,13 @@
-
 use rusqlite::Connection;
 
 use crate::auth::{CredentialHandle, CredentialService, OAuthService};
-use crate::storage::db::Database;
 use crate::models::{Conversation, Message, MessageRole, Model};
 use crate::providers::{
     resolve_openai_provider_with_api_key, resolve_openai_provider_with_bearer_token,
-    resolve_provider_with_credential, LLMProvider, OpenAIProvider, ProviderError,
-    ProviderRequest, ProviderResolutionError, ResolvedProvider,
+    resolve_provider_with_credential, LLMProvider, OpenAIProvider, ProviderError, ProviderRequest,
+    ProviderResolutionError, ResolvedProvider,
 };
+use crate::storage::db::Database;
 use crate::storage::error::StorageError;
 use crate::storage::models::{
     AccountDto, MessageCompleteRequest, MessageCreateRequest, MessageDto, MessageErrorRequest,
@@ -222,7 +221,8 @@ impl ProviderResolutionService {
         connection: &Connection,
         pane: &crate::storage::models::PaneDto,
     ) -> Result<PaneExecutionContext, ProviderResolutionError> {
-        let (provider, credential) = Self::resolve_provider_and_credential_from_pane(connection, pane)?;
+        let (provider, credential) =
+            Self::resolve_provider_and_credential_from_pane(connection, pane)?;
         if provider.provider_type != "openai" {
             return Err(ProviderResolutionError::unsupported_provider(
                 provider.id,

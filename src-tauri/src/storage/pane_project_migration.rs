@@ -76,16 +76,17 @@ fn backfill_project_ids(connection: &Connection) -> StorageResult<()> {
 
     for (pane_id, workspace_id) in panes {
         let workspace = WorkspaceRepository::get_by_id(connection, &workspace_id)?;
-        let project_id = if ProjectRepository::is_project_metadata(workspace.metadata_json.as_deref())
-        {
-            workspace_id.clone()
-        } else {
-            let workspace_root = read_workspace_approved_root(workspace.metadata_json.as_deref());
-            workspace_root
-                .as_deref()
-                .and_then(|root| root_to_project.get(root).cloned())
-                .unwrap_or_else(|| focused_project_id.clone())
-        };
+        let project_id =
+            if ProjectRepository::is_project_metadata(workspace.metadata_json.as_deref()) {
+                workspace_id.clone()
+            } else {
+                let workspace_root =
+                    read_workspace_approved_root(workspace.metadata_json.as_deref());
+                workspace_root
+                    .as_deref()
+                    .and_then(|root| root_to_project.get(root).cloned())
+                    .unwrap_or_else(|| focused_project_id.clone())
+            };
 
         ProjectRepository::get_by_id(connection, &project_id)?;
         connection.execute(
@@ -137,7 +138,9 @@ fn rehome_to_shell_workspace(connection: &Connection) -> StorageResult<()> {
     Ok(())
 }
 
-fn build_root_to_project_map(connection: &Connection) -> StorageResult<std::collections::HashMap<String, String>> {
+fn build_root_to_project_map(
+    connection: &Connection,
+) -> StorageResult<std::collections::HashMap<String, String>> {
     let workspaces = WorkspaceRepository::list_active(connection)?;
     let mut map = std::collections::HashMap::new();
 
@@ -209,8 +212,12 @@ mod tests {
         let database = Database::initialize_at(path.clone())?;
 
         let pepfox_project_id = database.with_connection(|connection| {
-            ProjectRepository::create_from_folder(connection, &pepfox_dir.display().to_string(), true)
-                .map(|project| project.id)
+            ProjectRepository::create_from_folder(
+                connection,
+                &pepfox_dir.display().to_string(),
+                true,
+            )
+            .map(|project| project.id)
         })?;
 
         let (pane_id, message_count) = database.with_connection(|connection| {
@@ -243,7 +250,10 @@ mod tests {
                 "UPDATE panes SET project_id = NULL WHERE id = ?1",
                 [&pane.id],
             )?;
-            connection.execute("DELETE FROM app_settings WHERE key = ?1", [BACKFILL_SETTING_KEY])?;
+            connection.execute(
+                "DELETE FROM app_settings WHERE key = ?1",
+                [BACKFILL_SETTING_KEY],
+            )?;
             backfill_project_ids(connection)?;
             rehome_to_shell_workspace(connection)?;
             Ok((pane.id, count))
@@ -254,10 +264,7 @@ mod tests {
         database.with_connection(|connection| {
             let pane = PaneRepository::get_by_id(connection, &pane_id)?;
             assert_eq!(pane.workspace_id, DEFAULT_WORKSPACE_ID);
-            assert_eq!(
-                pane.project_id.as_deref(),
-                Some(pepfox_project_id.as_str())
-            );
+            assert_eq!(pane.project_id.as_deref(), Some(pepfox_project_id.as_str()));
 
             let messages = MessageRepository::list_for_pane(connection, &pane_id)?;
             assert_eq!(messages.len(), 1);

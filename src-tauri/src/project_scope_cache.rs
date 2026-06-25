@@ -43,13 +43,7 @@ impl ProjectScopeCache {
             approved_root: project.approved_root.clone(),
         };
 
-        if let Some(cached) = self
-            .entries
-            .lock()
-            .map_err(lock_error)?
-            .get(&key)
-            .cloned()
-        {
+        if let Some(cached) = self.entries.lock().map_err(lock_error)?.get(&key).cloned() {
             return Ok(cached);
         }
 
@@ -101,9 +95,7 @@ mod tests {
     use crate::storage::error::StorageResult;
 
     fn temp_database(name: &str) -> Database {
-        let path = std::env::temp_dir()
-            .join("builderboard-tests")
-            .join(name);
+        let path = std::env::temp_dir().join("builderboard-tests").join(name);
         let _ = std::fs::remove_file(&path);
         Database::initialize_at(path).expect("initialize database")
     }
@@ -122,10 +114,10 @@ mod tests {
                 .map(|project| project.id)
         })?;
 
-        let first = database
-            .with_connection(|connection| cache.resolve(connection, &project_id))?;
-        let second = database
-            .with_connection(|connection| cache.resolve(connection, &project_id))?;
+        let first =
+            database.with_connection(|connection| cache.resolve(connection, &project_id))?;
+        let second =
+            database.with_connection(|connection| cache.resolve(connection, &project_id))?;
 
         assert_eq!(first.project_id, second.project_id);
         assert_eq!(first.approved_root, second.approved_root);
@@ -146,9 +138,11 @@ mod tests {
                 .map(|project| project.id)
         })?;
 
-        let first = database.with_connection(|connection| cache.resolve(connection, &project_id))?;
+        let first =
+            database.with_connection(|connection| cache.resolve(connection, &project_id))?;
         cache.invalidate_project(&project_id);
-        let second = database.with_connection(|connection| cache.resolve(connection, &project_id))?;
+        let second =
+            database.with_connection(|connection| cache.resolve(connection, &project_id))?;
         assert_eq!(first.approved_root, second.approved_root);
         Ok(())
     }

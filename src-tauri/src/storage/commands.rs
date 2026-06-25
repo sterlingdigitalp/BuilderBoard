@@ -3,25 +3,21 @@ use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Runtime, State};
 
 use crate::auth::{CredentialService, OAuthService};
-use crate::chat::{PaneExecutionContext, ProviderResolutionService};
 use crate::builders::global_builder_registry;
+use crate::chat::{PaneExecutionContext, ProviderResolutionService};
 use crate::execution::{global_engine_registry, ExecutionClass};
-use crate::filesystem_intent::{FilesystemToolCall, route_filesystem_tools};
-use crate::project_scope_cache::ProjectScopeCache;
-use crate::stream_execution::{run_background_stream_chat, StreamChatJob};
-use crate::stream_persistence::StreamPersistenceService;
-use crate::projects::repository::ProjectRepository;
+use crate::filesystem_intent::{route_filesystem_tools, FilesystemToolCall};
 use crate::filesystem_tools::perf::{trace_perf_metric, PerfSpan};
-use crate::runtime_diagnostics::{
-    emit_main_thread_block_total, trace_runtime_phase, RuntimeSpan,
-};
 use crate::filesystem_tools::scan_context::ScanContext;
 use crate::filesystem_tools::service::{
     FilesystemService, MAX_INJECTED_FIND_PATHS, MAX_INJECTED_READ_FILE_CHARS,
     MAX_INJECTED_SEARCH_FILES, MAX_PROMPT_INJECTION_BYTES,
 };
 use crate::models::{Conversation, Message, MessageRole, Model};
+use crate::project_scope_cache::ProjectScopeCache;
+use crate::projects::repository::ProjectRepository;
 use crate::providers::StreamChunk;
+use crate::runtime_diagnostics::{emit_main_thread_block_total, trace_runtime_phase, RuntimeSpan};
 use crate::storage::db::Database;
 use crate::storage::error::StorageError;
 use crate::storage::models::{
@@ -34,6 +30,8 @@ use crate::storage::repositories::messages::MessageRepository;
 use crate::storage::repositories::panes::PaneRepository;
 use crate::storage::repositories::providers::ProviderRepository;
 use crate::storage::repositories::workspaces::WorkspaceRepository;
+use crate::stream_execution::{run_background_stream_chat, StreamChatJob};
+use crate::stream_persistence::StreamPersistenceService;
 
 #[tauri::command]
 pub fn provider_list(database: State<'_, Arc<Database>>) -> Result<Vec<ProviderDto>, String> {
@@ -108,15 +106,94 @@ pub fn builder_list() -> Vec<serde_json::Value> {
 }
 
 #[tauri::command]
+pub fn capability_list(
+    allow_shell: Option<bool>,
+    allow_read: Option<bool>,
+    allow_write: Option<bool>,
+    allow_delete: Option<bool>,
+    allow_git: Option<bool>,
+    allow_packages: Option<bool>,
+    allow_processes: Option<bool>,
+    allow_network: Option<bool>,
+    include_unavailable: Option<bool>,
+) -> Vec<serde_json::Value> {
+    let policy = crate::execution::context::ExecutionPolicy {
+        allow_shell: allow_shell.unwrap_or(true),
+        allow_network: allow_network.unwrap_or(true),
+        allow_read: allow_read.unwrap_or(true),
+        allow_write: allow_write.unwrap_or(true),
+        allow_delete: allow_delete.unwrap_or(true),
+        allow_git: allow_git.unwrap_or(true),
+        allow_packages: allow_packages.unwrap_or(true),
+        allow_processes: allow_processes.unwrap_or(true),
+        max_tokens: None,
+        timeout_ms: None,
+    };
+    let show_all = include_unavailable.unwrap_or(false);
+
+    let registry_arc = crate::execution::tools::registry::global_tool_registry();
+    let reg = match registry_arc.read() {
+        Ok(r) => r,
+        Err(_) => return vec![],
+    };
+
+    let all_tools: Vec<_> = if show_all {
+        reg.list()
+    } else {
+        crate::execution::capability_resolver::resolve_allowed_tools(&policy, &reg)
+    };
+
+    all_tools.iter().map(|tool| {
+        let desc = tool.describe();
+        let schema = crate::execution::capability_resolver::tool_input_schema(tool.id().as_str());
+        let is_allowed = tool.permissions().iter().all(|p| {
+            crate::execution::capability_resolver::tool_permission_allowed(p, &policy)
+        });
+        let blocked_reason = if !is_allowed {
+            let blocked: Vec<String> = tool.permissions().iter()
+                .filter(|p| !crate::execution::capability_resolver::tool_permission_allowed(p, &policy))
+                .map(|p| p.as_str().to_string())
+                .collect();
+            Some(blocked.join(", "))
+        } else {
+            None
+        };
+
+        serde_json::json!({
+            "id": desc.id,
+            "displayName": desc.display_name,
+            "description": desc.description,
+            "category": desc.category,
+            "permissions": desc.permissions,
+            "executionClasses": desc.supported_execution_classes,
+            "inputSchema": schema,
+            "available": is_allowed,
+            "blockedReason": blocked_reason,
+            "examples": crate::execution::capability_resolver::tool_usage_examples(tool.id().as_str()),
+        })
+    }).collect()
+}
+
+#[tauri::command]
 pub fn resolve_execution(builder: Option<String>, class: Option<String>) -> serde_json::Value {
     let _mgr = crate::execution::manager::ExecutionManager::new();
     let ctx = crate::execution::ExecutionContext::local("resolve".to_string());
     let req = crate::execution::ExecutionRequest::chat(
-        crate::models::Conversation::new("resolve", crate::models::Model::Custom("resolve".to_string())),
+        crate::models::Conversation::new(
+            "resolve",
+            crate::models::Model::Custom("resolve".to_string()),
+        ),
         None,
     );
-    let cls = class.map(|c| ExecutionClass::from_str(&c)).unwrap_or(ExecutionClass::Implementation);
-    let res = crate::execution::manager::ExecutionManager::resolve(builder.as_deref(), Some(cls), &ctx, &req);
+    let cls = class
+        .map(|c| ExecutionClass::from_str(&c))
+        .unwrap_or(ExecutionClass::Implementation);
+    let res = crate::execution::manager::ExecutionManager::resolve(
+        builder.as_deref(),
+        Some(cls),
+        &ctx,
+        &req,
+    );
     serde_json::json!({
         "engineId": res.engine_id,
         "model": res.model,
@@ -219,7 +296,9 @@ pub fn pane_set_project(
         .map_err(format_storage_error)?;
 
     let pane = database
-        .with_connection(|connection| PaneRepository::set_project(connection, &pane_id, &project_id))
+        .with_connection(|connection| {
+            PaneRepository::set_project(connection, &pane_id, &project_id)
+        })
         .map_err(format_storage_error)?;
 
     if let Some(previous_project_id) = previous_project_id {
@@ -414,12 +493,10 @@ pub async fn stream_chat(
 #[tauri::command]
 pub fn runtime_probe_ping() -> Result<u64, String> {
     trace_runtime_phase("runtime_probe_ping", "ok");
-    Ok(
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_err(|error| error.to_string())?
-            .as_millis() as u64,
-    )
+    Ok(std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|error| error.to_string())?
+        .as_millis() as u64)
 }
 
 pub(crate) struct PreparedStreamExecution {
@@ -483,7 +560,9 @@ pub(crate) fn prepare_stream_execution_db_only(
         &pane_for_resolution,
     ) {
         Ok(context) => context,
-        Err(_error) if account_id.is_empty() && global_engine_registry().get(provider_id).is_some() => {
+        Err(_error)
+            if account_id.is_empty() && global_engine_registry().get(provider_id).is_some() =>
+        {
             PaneExecutionContext {
                 provider: ProviderDto {
                     id: provider_id.to_string(),
@@ -543,11 +622,8 @@ pub(crate) fn prepare_stream_execution_db_only(
         ),
     ));
 
-    let enrichment_plan = prepare_filesystem_enrichment_with_scope(
-        connection,
-        &cached_scope.scope,
-        &conversation,
-    )?;
+    let enrichment_plan =
+        prepare_filesystem_enrichment_with_scope(connection, &cached_scope.scope, &conversation)?;
 
     Ok(PreparedStreamExecution {
         execution_context,
@@ -737,8 +813,10 @@ fn execute_filesystem_tool_calls(
 ) -> Result<Vec<FilesystemToolResult>, StorageError> {
     let mut results = Vec::new();
     let mut shared_scan_context = ScanContext::for_tool(prompt, ".");
-    let mut read_cache: std::collections::HashMap<String, crate::filesystem_tools::models::ReadFileResult> =
-        std::collections::HashMap::new();
+    let mut read_cache: std::collections::HashMap<
+        String,
+        crate::filesystem_tools::models::ReadFileResult,
+    > = std::collections::HashMap::new();
     for call in calls {
         trace_filesystem_tool_loop(&format!("TOOL={}", call.trace_tool_name()));
         match call {
@@ -1049,7 +1127,11 @@ pub(crate) fn emit_stream_chunk<R: Runtime>(
     );
 }
 
-pub(crate) fn emit_stream_complete<R: Runtime>(app: &AppHandle<R>, pane_id: &str, message_id: &str) {
+pub(crate) fn emit_stream_complete<R: Runtime>(
+    app: &AppHandle<R>,
+    pane_id: &str,
+    message_id: &str,
+) {
     let _ = app.emit(
         "message_stream_complete",
         serde_json::json!({
@@ -1198,8 +1280,8 @@ mod tests {
         prepare_stream_execution_db_only, provider_list_from_database,
         run_filesystem_enrichment_async,
     };
-    use crate::filesystem_intent::{route_filesystem_tools, FilesystemToolCall};
     use crate::auth::CredentialService;
+    use crate::filesystem_intent::{route_filesystem_tools, FilesystemToolCall};
     use crate::filesystem_tools::approved_root::set_approved_root;
     use crate::models::Model;
     use crate::models::{Conversation, Message, MessageRole};
@@ -1341,12 +1423,14 @@ mod tests {
                 .first(),
             Some(FilesystemToolCall::ListDirectory { path }) if path == "."
         ));
-        assert!(route_filesystem_tools("Review /Users/sterlingdigital/PepFox")
-            .tools
-            .iter()
-            .any(|call| {
-                matches!(call, FilesystemToolCall::ListDirectory { path } if path == ".")
-            }));
+        assert!(
+            route_filesystem_tools("Review /Users/sterlingdigital/PepFox")
+                .tools
+                .iter()
+                .any(|call| {
+                    matches!(call, FilesystemToolCall::ListDirectory { path } if path == ".")
+                })
+        );
         assert!(matches!(
             route_filesystem_tools("Take a look at PepFox")
                 .tools
@@ -1371,9 +1455,11 @@ mod tests {
             .any(|call| {
                 matches!(call, FilesystemToolCall::FindFiles { path, pattern } if path == "." && pattern == "*.ts")
             }));
-        assert!(!route_filesystem_tools("Perform a production readiness review")
-            .tools
-            .is_empty());
+        assert!(
+            !route_filesystem_tools("Perform a production readiness review")
+                .tools
+                .is_empty()
+        );
         assert!(route_filesystem_tools("Find security concerns")
             .tools
             .iter()
@@ -1413,7 +1499,10 @@ mod tests {
     #[test]
     fn filesystem_tool_loop_injects_find_files_results() -> StorageResult<()> {
         let context = tool_context_for_prompt("Find all TypeScript files.")?;
-        assert!(context.contains(r#""tool":"find_files"#) || context.contains(r#""tool": "find_files""#));
+        assert!(
+            context.contains(r#""tool":"find_files"#)
+                || context.contains(r#""tool": "find_files""#)
+        );
         assert!(context.contains("src/auth.ts"));
         assert!(context.contains("src/index.ts"));
         Ok(())
@@ -1423,8 +1512,14 @@ mod tests {
     fn review_prompt_avoids_find_files_and_caps_payload_size() -> StorageResult<()> {
         let context = tool_context_for_prompt("Review the project architecture.")?;
         assert!(!context.contains(r#""tool":"find_files"#));
-        assert!(context.contains(r#""tool":"list_directory"#) || context.contains(r#""tool": "list_directory""#));
-        assert!(context.len() <= 24_576, "review payload should stay within injection budget");
+        assert!(
+            context.contains(r#""tool":"list_directory"#)
+                || context.contains(r#""tool": "list_directory""#)
+        );
+        assert!(
+            context.len() <= 24_576,
+            "review payload should stay within injection budget"
+        );
         Ok(())
     }
 

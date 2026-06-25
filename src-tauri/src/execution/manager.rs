@@ -5,10 +5,10 @@
 //! Manager scores engines, applies policy, handles intelligent fallback with reasons.
 //! Extends existing architecture; engines and builders remain unchanged.
 
-use crate::builders::{Builder, global_builder_registry};
+use crate::builders::{global_builder_registry, Builder};
 use crate::execution::capabilities::EngineCapabilities;
 use crate::execution::context::ExecutionContext;
-use crate::execution::engine::{ExecutionEngine, global_engine_registry};
+use crate::execution::engine::{global_engine_registry, ExecutionEngine};
 use crate::execution::request::ExecutionRequest;
 
 /// Strongly typed execution classification.
@@ -154,7 +154,11 @@ fn score_engine(
 
     // Locality preference (prefer local for speed in implementation)
     let loc_str = format!("{:?}", caps.locality);
-    if matches!(class, ExecutionClass::Implementation | ExecutionClass::Debugging) && (loc_str.contains("Local") || loc_str.contains("Hybrid")) {
+    if matches!(
+        class,
+        ExecutionClass::Implementation | ExecutionClass::Debugging
+    ) && (loc_str.contains("Local") || loc_str.contains("Hybrid"))
+    {
         score += 10;
     }
 
@@ -239,7 +243,7 @@ impl ExecutionManager {
 
         for engine_id in candidates {
             if let Some(engine) = engine_reg.get(&engine_id) {
-                let health = engine.health();  // Note: engines now should implement health; current ones do via prior phases
+                let health = engine.health(); // Note: engines now should implement health; current ones do via prior phases
                 let caps = engine.capabilities();
 
                 // Basic policy check (simplified - extend as needed)
@@ -256,7 +260,11 @@ impl ExecutionManager {
                 } else if profile.fallback_engines.contains(&engine_id) {
                     format!("Fallback from preferred; {} class match", class.as_str())
                 } else {
-                    format!("Best available match for {} (score={})", class.as_str(), score)
+                    format!(
+                        "Best available match for {} (score={})",
+                        class.as_str(),
+                        score
+                    )
                 };
 
                 let candidate = (engine_id.clone(), score, reason);
@@ -342,7 +350,8 @@ impl ExecutionManager {
             reason: if engine_exists {
                 "Direct engine selection".to_string()
             } else {
-                "Unregistered engine selected; execution will fail if no engine is available".to_string()
+                "Unregistered engine selected; execution will fail if no engine is available"
+                    .to_string()
             },
             class,
             policy_applied: false,
@@ -366,6 +375,8 @@ mod tests {
         ExecutionRequest::Chat(ChatRequest {
             conversation: Conversation::new("test", Model::Custom("test".into())),
             reasoning_level: None,
+            native_tools: vec![],
+            trace_round: None,
         })
     }
 
@@ -384,14 +395,22 @@ mod tests {
         let ctx = ExecutionContext::local("test-exec");
         let req = sample_chat_request();
         // Use a builder that prefers something unavailable
-        let res = ExecutionManager::resolve(Some("builder-c"), Some(ExecutionClass::Implementation), &ctx, &req);
+        let res = ExecutionManager::resolve(
+            Some("builder-c"),
+            Some(ExecutionClass::Implementation),
+            &ctx,
+            &req,
+        );
         assert!(!res.engine_id.is_empty());
         assert!(!res.reason.is_empty());
     }
 
     #[test]
     fn execution_class_from_str_roundtrips() {
-        assert_eq!(ExecutionClass::from_str("implementation"), ExecutionClass::Implementation);
+        assert_eq!(
+            ExecutionClass::from_str("implementation"),
+            ExecutionClass::Implementation
+        );
         assert_eq!(ExecutionClass::from_str("review"), ExecutionClass::Review);
         assert_eq!(ExecutionClass::from_str("foo"), ExecutionClass::General);
     }

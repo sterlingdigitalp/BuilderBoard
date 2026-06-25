@@ -126,17 +126,14 @@ impl StreamPersistenceService {
             sender
                 .send(PersistEnvelope {
                     pane_id: String::new(),
-                    command: PersistCommand::Drain {
-                        message_id,
-                        ack,
-                    },
+                    command: PersistCommand::Drain { message_id, ack },
                 })
                 .map_err(|_| {
                     StorageError::InvalidInput("stream persistence worker unavailable".to_string())
                 })?;
-            receiver
-                .recv()
-                .map_err(|_| StorageError::InvalidInput("persistence drain cancelled".to_string()))?
+            receiver.recv().map_err(|_| {
+                StorageError::InvalidInput("persistence drain cancelled".to_string())
+            })?
         })
         .await
         .map_err(|_| StorageError::InvalidInput("persistence drain task cancelled".to_string()))?
@@ -149,7 +146,9 @@ impl StreamPersistenceService {
                 StorageError::InvalidInput("stream persistence worker unavailable".to_string())
             })?
             .send(envelope)
-            .map_err(|_| StorageError::InvalidInput("stream persistence worker unavailable".to_string()))
+            .map_err(|_| {
+                StorageError::InvalidInput("stream persistence worker unavailable".to_string())
+            })
     }
 }
 

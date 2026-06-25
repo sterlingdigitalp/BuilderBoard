@@ -5,14 +5,11 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use builderboard_lib::filesystem_intent::route_filesystem_tools;
-use builderboard_lib::stream_persistence::StreamPersistenceService;
 use builderboard_lib::projects::commands::project_create_from_folder_with_database;
 use builderboard_lib::storage::db::Database;
 use builderboard_lib::storage::models::CreatePaneRequest;
-use builderboard_lib::storage::repositories::{
-    messages::MessageRepository,
-    panes::PaneRepository,
-};
+use builderboard_lib::storage::repositories::{messages::MessageRepository, panes::PaneRepository};
+use builderboard_lib::stream_persistence::StreamPersistenceService;
 
 static TEST_DB_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -152,7 +149,9 @@ fn persistence_worker_preserves_append_order() {
     drop(service);
 
     let message = database
-        .with_connection(|connection| MessageRepository::get_by_id(connection, &assistant_message_id))
+        .with_connection(|connection| {
+            MessageRepository::get_by_id(connection, &assistant_message_id)
+        })
         .expect("load message");
     assert_eq!(message.content, "abcdef");
 }

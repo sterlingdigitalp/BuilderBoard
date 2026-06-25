@@ -96,7 +96,7 @@ impl EngineCapabilities {
                 chat: true,
                 streaming: true,
                 reasoning: true,
-                tool_use: false, // current phase
+                tool_use: true,
                 images: false,
                 embeddings: false,
                 structured_output: false,
@@ -113,7 +113,9 @@ impl EngineCapabilities {
             },
             resources: ResourceRequirements::default(),
             tags: vec!["http".to_string(), "remote".to_string()],
-            description: Some("OpenAI Chat Completions (including ChatGPT OAuth backend)".to_string()),
+            description: Some(
+                "OpenAI Chat Completions (including ChatGPT OAuth backend)".to_string(),
+            ),
         }
     }
 }

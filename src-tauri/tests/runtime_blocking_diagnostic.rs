@@ -6,9 +6,7 @@ use builderboard_lib::storage::db::Database;
 use builderboard_lib::storage::repositories::panes::PaneRepository;
 
 fn temp_database(name: &str) -> Database {
-    let path = std::env::temp_dir()
-        .join("builderboard-tests")
-        .join(name);
+    let path = std::env::temp_dir().join("builderboard-tests").join(name);
     let _ = std::fs::remove_file(&path);
     Database::initialize_at(path).expect("initialize database")
 }

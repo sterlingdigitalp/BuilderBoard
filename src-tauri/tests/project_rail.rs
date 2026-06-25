@@ -27,12 +27,9 @@ fn create_named_project(database: &Database, parent: &PathBuf, name: &str) -> St
         fs::write(folder.join("package.json"), r#"{"name":"pepfox"}"#).expect("write package");
     }
 
-    let project = project_create_from_folder_with_database(
-        database,
-        &folder.display().to_string(),
-        None,
-    )
-    .expect("create project");
+    let project =
+        project_create_from_folder_with_database(database, &folder.display().to_string(), None)
+            .expect("create project");
 
     project.id
 }
@@ -55,7 +52,10 @@ fn project_rail_codes_and_switching() {
 
     let projects = project_list_from_database(&database).expect("list");
     assert_eq!(projects.len(), 5);
-    let codes: Vec<_> = projects.iter().map(|project| project.code.as_str()).collect();
+    let codes: Vec<_> = projects
+        .iter()
+        .map(|project| project.code.as_str())
+        .collect();
     assert!(codes.contains(&"Pe"));
     assert!(codes.contains(&"As"));
     assert!(codes.contains(&"Ag"));
@@ -78,10 +78,12 @@ fn project_rail_codes_and_switching() {
         .expect("root");
     assert!(approved.contains("PepFox"));
 
-    let listing =
-        filesystem_list_directory_with_database(&database, None, Some(&pepfox_id), ".")
-            .expect("list");
-    assert!(listing.entries.iter().any(|entry| entry.name == "package.json"));
+    let listing = filesystem_list_directory_with_database(&database, None, Some(&pepfox_id), ".")
+        .expect("list");
+    assert!(listing
+        .entries
+        .iter()
+        .any(|entry| entry.name == "package.json"));
 
     let package =
         filesystem_read_file_with_database(&database, None, Some(&pepfox_id), "package.json")
@@ -193,7 +195,10 @@ fn project_rail_pepfox_live_folder() {
         project_create_from_folder_with_database(&database, pepfox, None).expect("create pepfox");
     assert_eq!(project.name, "PepFox");
     assert_eq!(project.code, "Pe");
-    assert_eq!(project.approved_root, fs::canonicalize(pepfox).unwrap().display().to_string());
+    assert_eq!(
+        project.approved_root,
+        fs::canonicalize(pepfox).unwrap().display().to_string()
+    );
 
     let find_ts = builderboard_lib::filesystem_tools::filesystem_find_files_with_database(
         &database,

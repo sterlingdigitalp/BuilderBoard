@@ -162,12 +162,7 @@ impl FilesystemService {
         path: &str,
         pattern: &str,
     ) -> FilesystemResult<FindFilesResult> {
-        Self::find_files_with_context(
-            scope,
-            path,
-            pattern,
-            &mut ScanContext::direct_command(path),
-        )
+        Self::find_files_with_context(scope, path, pattern, &mut ScanContext::direct_command(path))
     }
 
     pub fn find_files_with_context(

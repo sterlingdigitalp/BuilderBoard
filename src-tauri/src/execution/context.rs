@@ -25,6 +25,12 @@ pub struct ProjectContext {
 pub struct ExecutionPolicy {
     pub allow_shell: bool,
     pub allow_network: bool,
+    pub allow_read: bool,
+    pub allow_write: bool,
+    pub allow_delete: bool,
+    pub allow_git: bool,
+    pub allow_packages: bool,
+    pub allow_processes: bool,
     pub max_tokens: Option<u32>,
     pub timeout_ms: Option<u64>,
     // Future: sandbox profile, permission model, etc.

@@ -60,6 +60,10 @@ pub trait ExecutionEngine: Send + Sync {
         "available".to_string()
     }
 
+    fn supports_native_tools(&self) -> bool {
+        false
+    }
+
     /// Primary generic entry point.
     ///
     /// The engine receives a rich context (project/fs/optional creds/cancellation)
@@ -126,11 +130,20 @@ impl ExecutionEngine for OpenAIExecutionEngine {
     }
 
     fn supported_effort_levels(&self) -> Vec<String> {
-        vec!["low".to_string(), "medium".to_string(), "high".to_string(), "max".to_string()]
+        vec![
+            "low".to_string(),
+            "medium".to_string(),
+            "high".to_string(),
+            "max".to_string(),
+        ]
     }
 
     fn health(&self) -> String {
         "available".to_string()
+    }
+
+    fn supports_native_tools(&self) -> bool {
+        true
     }
 
     fn execute(
@@ -144,15 +157,15 @@ impl ExecutionEngine for OpenAIExecutionEngine {
             ExecutionRequest::Chat(c) => c,
             other => {
                 let kind = other.kind().to_string();
-                return Box::pin(async move {
-                    Err(ExecutionError::UnsupportedRequest { kind })
-                });
+                return Box::pin(async move { Err(ExecutionError::UnsupportedRequest { kind }) });
             }
         };
 
         // Convert to old internal types (preserves exact OpenAI logic and behavior)
         let old_request = OldProviderRequest::new(chat_req.conversation)
-            .with_reasoning_level(chat_req.reasoning_level);
+            .with_reasoning_level(chat_req.reasoning_level)
+            .with_native_tools(chat_req.native_tools)
+            .with_trace_round(chat_req.trace_round);
 
         // Build a minimal legacy context for the credential resolution path we already have.
         // We only use the credential parts; the rest of the new context (fs, project) is
@@ -189,10 +202,16 @@ impl ExecutionEngine for OpenAIExecutionEngine {
         Box::pin(async move {
             // Use the existing credential-bound provider (exact same path as before)
             let provider = match creds {
-                Some(cs) => match ProviderResolutionService::resolve_openai_provider(legacy_ctx, &cs) {
-                    Ok(p) => p,
-                    Err(e) => return Err(ExecutionError::Internal { message: format!("{:?}", e) }),
-                },
+                Some(cs) => {
+                    match ProviderResolutionService::resolve_openai_provider(legacy_ctx, &cs) {
+                        Ok(p) => p,
+                        Err(e) => {
+                            return Err(ExecutionError::Internal {
+                                message: format!("{:?}", e),
+                            })
+                        }
+                    }
+                }
                 None => {
                     // For pure local future engines this would be fine, but OpenAI needs it.
                     return Err(ExecutionError::Internal {
@@ -216,6 +235,13 @@ impl ExecutionEngine for OpenAIExecutionEngine {
                             if !chunk.content_delta.is_empty() {
                                 on_event(ExecutionEvent::TextDelta {
                                     content: chunk.content_delta,
+                                });
+                            }
+                            for tool_call in chunk.tool_calls {
+                                on_event(ExecutionEvent::ToolCallStarted {
+                                    call_id: tool_call.call_id,
+                                    name: tool_call.tool_name,
+                                    arguments: Some(tool_call.arguments.to_string()),
                                 });
                             }
                             if chunk.is_complete {
@@ -258,7 +284,9 @@ pub struct EngineRegistry {
 
 impl EngineRegistry {
     pub fn new() -> Self {
-        Self { engines: HashMap::new() }
+        Self {
+            engines: HashMap::new(),
+        }
     }
 
     pub fn register(&mut self, engine: Arc<dyn ExecutionEngine>) {
@@ -287,7 +315,13 @@ pub fn global_engine_registry() -> &'static EngineRegistry {
 pub fn register_default_engines(registry: &mut EngineRegistry) {
     registry.register(Arc::new(OpenAIExecutionEngine::new()));
     // Grok Build via CLI (registered as "grok" so it can be selected by model or provider)
-    registry.register(Arc::new(crate::execution::grok_build::GrokBuildExecutionEngine::new()));
+    registry.register(Arc::new(
+        crate::execution::grok_build::GrokBuildExecutionEngine::new(),
+    ));
+    // Tool Runtime engine — routes ExecutionRequest::Tool → ToolRegistry → Tool
+    registry.register(Arc::new(
+        crate::execution::tool_engine::ToolExecutionEngine::new(),
+    ));
 }
 
 #[cfg(test)]

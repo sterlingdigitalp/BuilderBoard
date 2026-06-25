@@ -37,6 +37,15 @@ pub fn run() -> tauri::Result<()> {
             app.manage(oauth);
             app.manage(stream_persistence);
             app.manage(project_scope_cache);
+
+            // Register default tools for Phase 9A Tool Runtime
+            if let Err(e) = crate::execution::tools::registry::register_default_tools() {
+                eprintln!(
+                    "[tool_registry] Warning: failed to register default tools: {}",
+                    e
+                );
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -44,6 +53,7 @@ pub fn run() -> tauri::Result<()> {
             commands::engine_list,
             commands::builder_list,
             commands::resolve_execution,
+            commands::capability_list,
             commands::workspace_create,
             commands::workspace_list,
             commands::workspace_switch,

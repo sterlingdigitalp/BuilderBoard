@@ -33,8 +33,9 @@ fn setup_project_with_heavy_node_modules(name: &str) -> (Database, String, PathB
     let path = test_database_path(&format!("{name}.db"));
     let _ = fs::remove_file(&path);
     let database = Database::initialize_at(path).expect("initialize database");
-    let project = project_create_from_folder_with_database(&database, &root.display().to_string(), None)
-        .expect("create project");
+    let project =
+        project_create_from_folder_with_database(&database, &root.display().to_string(), None)
+            .expect("create project");
 
     (database, project.id, root)
 }
@@ -51,8 +52,9 @@ fn ignored_directories_are_skipped_during_find_files() {
         .expect("load scope");
 
     let mut ignored_context = ScanContext::for_tool("Find all TypeScript files.", ".");
-    let ignored = FilesystemService::find_files_with_context(&scope, ".", "*.ts", &mut ignored_context)
-        .expect("find with ignore");
+    let ignored =
+        FilesystemService::find_files_with_context(&scope, ".", "*.ts", &mut ignored_context)
+            .expect("find with ignore");
 
     assert_eq!(ignored.matches, vec!["src/index.ts".to_string()]);
     assert!(!ignored
@@ -88,8 +90,8 @@ fn find_files_with_ignore_list_completes_quickly_on_heavy_node_modules() {
 
     let started = Instant::now();
     let mut context = ScanContext::for_tool("Find all TypeScript files.", ".");
-    let result =
-        FilesystemService::find_files_with_context(&scope, ".", "*.ts", &mut context).expect("find");
+    let result = FilesystemService::find_files_with_context(&scope, ".", "*.ts", &mut context)
+        .expect("find");
     let elapsed_ms = started.elapsed().as_millis();
 
     assert_eq!(result.matches, vec!["src/index.ts".to_string()]);
@@ -102,8 +104,9 @@ fn find_files_with_ignore_list_completes_quickly_on_heavy_node_modules() {
 #[test]
 fn direct_api_find_files_skips_node_modules_by_default() {
     let (database, project_id, _root) = setup_project_with_heavy_node_modules("ignore-api");
-    let result = filesystem_find_files_with_database(&database, None, Some(&project_id), ".", "*.ts")
-        .expect("api find");
+    let result =
+        filesystem_find_files_with_database(&database, None, Some(&project_id), ".", "*.ts")
+            .expect("api find");
     assert_eq!(result.matches, vec!["src/index.ts".to_string()]);
 }
 
@@ -141,8 +144,9 @@ fn benchmark_review_prompt_payload_on_local_projects() {
         .expect("create project");
 
         let started = Instant::now();
-        let find = filesystem_find_files_with_database(&database, None, Some(&project.id), ".", "*.ts")
-            .expect("find ts");
+        let find =
+            filesystem_find_files_with_database(&database, None, Some(&project.id), ".", "*.ts")
+                .expect("find ts");
         let find_ms = started.elapsed().as_millis();
 
         println!(

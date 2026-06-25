@@ -85,10 +85,7 @@ impl DatabaseLockSpan {
     pub fn acquired(&mut self) {
         let wait_ms = self.wait_started.elapsed().as_millis();
         if wait_ms > 0 {
-            trace_runtime_metric(
-                &format!("DB_LOCK_WAIT_MS_{}", self.operation),
-                wait_ms,
-            );
+            trace_runtime_metric(&format!("DB_LOCK_WAIT_MS_{}", self.operation), wait_ms);
             trace_runtime_metric("DB_LOCK_WAIT_MS", wait_ms);
             if wait_ms >= 5 {
                 record_command_thread_block_ms(wait_ms);
@@ -100,10 +97,7 @@ impl DatabaseLockSpan {
     pub fn finish(self) {
         if let Some(hold_started) = self.hold_started {
             let hold_ms = hold_started.elapsed().as_millis();
-            trace_runtime_metric(
-                &format!("DB_LOCK_HOLD_MS_{}", self.operation),
-                hold_ms,
-            );
+            trace_runtime_metric(&format!("DB_LOCK_HOLD_MS_{}", self.operation), hold_ms);
             trace_runtime_metric("DB_LOCK_HOLD_MS", hold_ms);
         }
     }

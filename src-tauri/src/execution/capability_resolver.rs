@@ -3,9 +3,93 @@ use std::sync::Arc;
 use serde_json::json;
 
 use crate::execution::context::ExecutionPolicy;
+use crate::execution::manager::ExecutionClass;
 use crate::execution::tools::permissions::ToolPermission;
 use crate::execution::tools::registry::ToolRegistry;
 use crate::execution::tools::traits::Tool;
+use crate::models::{Conversation, MessageRole};
+
+/// Reusable capability profiles used to minimize the tool surface per mission.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CapabilityProfile {
+    ReasoningOnly,
+    ReadOnly,
+    Review,
+    Implementation,
+    Diagnostics,
+}
+
+impl CapabilityProfile {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            CapabilityProfile::ReasoningOnly => "reasoning_only",
+            CapabilityProfile::ReadOnly => "read_only",
+            CapabilityProfile::Review => "review",
+            CapabilityProfile::Implementation => "implementation",
+            CapabilityProfile::Diagnostics => "diagnostics",
+        }
+    }
+
+    pub fn tool_ids(&self) -> &'static [&'static str] {
+        match self {
+            CapabilityProfile::ReasoningOnly => &[],
+            CapabilityProfile::ReadOnly => &["filesystem.read", "search.grep", "search.glob"],
+            CapabilityProfile::Review => &[
+                "filesystem.read",
+                "search.grep",
+                "search.glob",
+                "git.status",
+                "git.diff",
+                "diagnostics.health",
+            ],
+            CapabilityProfile::Implementation => &[
+                "filesystem.read",
+                "filesystem.write",
+                "filesystem.edit",
+                "directory.list",
+                "directory.create",
+                "search.grep",
+                "search.glob",
+                "git.status",
+                "git.diff",
+                "git.log",
+                "shell",
+                "package.list",
+                "package.install",
+                "diagnostics.health",
+                "diagnostics.env",
+            ],
+            CapabilityProfile::Diagnostics => &[
+                "filesystem.read",
+                "search.grep",
+                "search.glob",
+                "shell",
+                "diagnostics.health",
+                "diagnostics.env",
+            ],
+        }
+    }
+}
+
+/// Mission classification result for diagnostics and profile resolution.
+#[derive(Clone, Debug)]
+pub struct MissionClassification {
+    pub mission: String,
+    pub class: ExecutionClass,
+    pub profile: CapabilityProfile,
+    pub reason: String,
+}
+
+impl MissionClassification {
+    fn new(mission: &str, class: ExecutionClass, profile: CapabilityProfile, reason: &str) -> Self {
+        Self {
+            mission: mission.to_string(),
+            class,
+            profile,
+            reason: reason.to_string(),
+        }
+    }
+}
 
 /// Audit report for capability resolution pipeline.
 #[derive(Clone, Debug)]
@@ -74,6 +158,152 @@ pub fn audit_capabilities(policy: &ExecutionPolicy, registry: &ToolRegistry) -> 
     }
 }
 
+/// Classify a conversation into a mission and minimal capability profile.
+pub fn classify_mission(conversation: &Conversation) -> MissionClassification {
+    let prompt = conversation
+        .messages
+        .iter()
+        .rev()
+        .find(|message| matches!(message.role, MessageRole::User))
+        .map(|message| message.content.as_str())
+        .unwrap_or_default();
+
+    classify_prompt(prompt)
+}
+
+/// Classify a plain prompt. Kept deterministic and conservative.
+pub fn classify_prompt(prompt: &str) -> MissionClassification {
+    let text = prompt.to_ascii_lowercase();
+
+    if contains_any(
+        &text,
+        &[
+            "cargo check",
+            "cargo test",
+            "npm run",
+            "run tests",
+            "run checks",
+            "validate",
+            "test suite",
+        ],
+    ) {
+        return MissionClassification::new(
+            "testing/validation",
+            ExecutionClass::Testing,
+            CapabilityProfile::Diagnostics,
+            "Prompt asks to run validation or tests.",
+        );
+    }
+
+    if contains_any(
+        &text,
+        &[
+            "create ",
+            "write ",
+            "edit ",
+            "modify ",
+            "implement",
+            "fix ",
+            "delete ",
+            "add ",
+            "rename ",
+        ],
+    ) && !contains_any(
+        &text,
+        &[
+            "write an executive summary",
+            "write executive summary",
+            "write a summary",
+            "write summary",
+        ],
+    ) {
+        return MissionClassification::new(
+            "implementation",
+            ExecutionClass::Implementation,
+            CapabilityProfile::Implementation,
+            "Prompt asks to create or change project artifacts.",
+        );
+    }
+
+    if contains_any(
+        &text,
+        &[
+            "review",
+            "audit",
+            "inspect",
+            "risk",
+            "regression",
+            "code review",
+        ],
+    ) {
+        return MissionClassification::new(
+            "review",
+            ExecutionClass::Review,
+            CapabilityProfile::Review,
+            "Prompt asks for review or audit work.",
+        );
+    }
+
+    if contains_any(
+        &text,
+        &[
+            "explain this file",
+            "explain the file",
+            "document",
+            "documentation",
+            "summarize this file",
+            "describe this file",
+        ],
+    ) {
+        return MissionClassification::new(
+            "documentation",
+            ExecutionClass::Documentation,
+            CapabilityProfile::ReadOnly,
+            "Prompt asks for explanation or documentation.",
+        );
+    }
+
+    if contains_any(
+        &text,
+        &[
+            "executive summary",
+            "architecture",
+            "architectural",
+            "design",
+            "strategy",
+            "plan",
+            "roadmap",
+        ],
+    ) {
+        return MissionClassification::new(
+            "architecture/planning",
+            ExecutionClass::Architecture,
+            CapabilityProfile::ReadOnly,
+            "Prompt asks for architecture, planning, or summary reasoning.",
+        );
+    }
+
+    if contains_any(&text, &["research", "find", "search"]) {
+        return MissionClassification::new(
+            "research",
+            ExecutionClass::Research,
+            CapabilityProfile::ReadOnly,
+            "Prompt asks for research or discovery.",
+        );
+    }
+
+    MissionClassification::new(
+        "general",
+        ExecutionClass::General,
+        CapabilityProfile::ReasoningOnly,
+        "No tool-requiring mission signal detected.",
+    )
+}
+
+fn contains_any(text: &str, needles: &[&str]) -> bool {
+    needles.iter().any(|needle| text.contains(needle))
+}
+
 /// Resolve all tools a builder is permitted to use given an ExecutionPolicy.
 pub fn resolve_allowed_tools<'a>(
     policy: &ExecutionPolicy,
@@ -82,6 +312,29 @@ pub fn resolve_allowed_tools<'a>(
     registry
         .list()
         .into_iter()
+        .filter(|tool| {
+            tool.permissions()
+                .iter()
+                .all(|perm| is_permission_allowed(perm, policy))
+        })
+        .collect()
+}
+
+/// Resolve the smallest profile-approved tool surface for a mission.
+pub fn resolve_profile_tools<'a>(
+    policy: &ExecutionPolicy,
+    registry: &'a ToolRegistry,
+    profile: &CapabilityProfile,
+) -> Vec<Arc<dyn Tool>> {
+    let profile_ids = profile.tool_ids();
+    if profile_ids.is_empty() {
+        return vec![];
+    }
+
+    registry
+        .list()
+        .into_iter()
+        .filter(|tool| profile_ids.contains(&tool.id().as_str()))
         .filter(|tool| {
             tool.permissions()
                 .iter()
@@ -755,6 +1008,80 @@ mod tests {
         }
     }
 
+    fn default_tool_registry_for_profiles() -> ToolRegistry {
+        let mut registry = ToolRegistry::new();
+        registry
+            .register(Arc::new(crate::execution::tools::shell::ShellTool))
+            .unwrap();
+        registry
+            .register(Arc::new(crate::execution::tools::filesystem::ReadTool))
+            .unwrap();
+        registry
+            .register(Arc::new(crate::execution::tools::filesystem::WriteTool))
+            .unwrap();
+        registry
+            .register(Arc::new(crate::execution::tools::filesystem::EditTool))
+            .unwrap();
+        registry
+            .register(Arc::new(crate::execution::tools::filesystem::DeleteTool))
+            .unwrap();
+        registry
+            .register(Arc::new(crate::execution::tools::directory::ListTool))
+            .unwrap();
+        registry
+            .register(Arc::new(crate::execution::tools::directory::CreateTool))
+            .unwrap();
+        registry
+            .register(Arc::new(crate::execution::tools::package::InstallTool))
+            .unwrap();
+        registry
+            .register(Arc::new(crate::execution::tools::package::ListTool))
+            .unwrap();
+        registry
+            .register(Arc::new(crate::execution::tools::git::StatusTool))
+            .unwrap();
+        registry
+            .register(Arc::new(crate::execution::tools::git::DiffTool))
+            .unwrap();
+        registry
+            .register(Arc::new(crate::execution::tools::git::LogTool))
+            .unwrap();
+        registry
+            .register(Arc::new(crate::execution::tools::diagnostics::HealthTool))
+            .unwrap();
+        registry
+            .register(Arc::new(crate::execution::tools::diagnostics::EnvTool))
+            .unwrap();
+        registry
+            .register(Arc::new(crate::execution::tools::search::GrepTool))
+            .unwrap();
+        registry
+            .register(Arc::new(crate::execution::tools::search::GlobTool))
+            .unwrap();
+        registry
+    }
+
+    fn tool_ids(tools: Vec<Arc<dyn Tool>>) -> Vec<String> {
+        let mut ids: Vec<String> = tools.iter().map(|tool| tool.id().to_string()).collect();
+        ids.sort();
+        ids
+    }
+
+    fn all_allowed_policy() -> ExecutionPolicy {
+        ExecutionPolicy {
+            allow_shell: true,
+            allow_network: true,
+            allow_read: true,
+            allow_write: true,
+            allow_delete: true,
+            allow_git: true,
+            allow_packages: true,
+            allow_processes: true,
+            max_tokens: None,
+            timeout_ms: None,
+        }
+    }
+
     #[test]
     fn resolve_allows_tools_with_matching_permissions() {
         let mut registry = ToolRegistry::new();
@@ -808,6 +1135,95 @@ mod tests {
         let allowed = resolve_allowed_tools(&policy, &registry);
         assert_eq!(allowed.len(), 1);
         assert_eq!(allowed[0].id().as_str(), "mock.noperm");
+    }
+
+    #[test]
+    fn mission_classifies_executive_summary_as_read_only_architecture() {
+        let mission = classify_prompt("Write an executive summary.");
+        assert_eq!(mission.class, ExecutionClass::Architecture);
+        assert_eq!(mission.profile, CapabilityProfile::ReadOnly);
+
+        let registry = default_tool_registry_for_profiles();
+        let ids = tool_ids(resolve_profile_tools(
+            &all_allowed_policy(),
+            &registry,
+            &mission.profile,
+        ));
+        assert_eq!(ids, vec!["filesystem.read", "search.glob", "search.grep"]);
+        assert!(!ids.contains(&"filesystem.write".to_string()));
+        assert!(!ids.contains(&"shell".to_string()));
+        assert!(!ids.contains(&"git.commit".to_string()));
+    }
+
+    #[test]
+    fn mission_classifies_review_as_review_profile() {
+        let mission = classify_prompt("Review this repository.");
+        assert_eq!(mission.class, ExecutionClass::Review);
+        assert_eq!(mission.profile, CapabilityProfile::Review);
+
+        let registry = default_tool_registry_for_profiles();
+        let ids = tool_ids(resolve_profile_tools(
+            &all_allowed_policy(),
+            &registry,
+            &mission.profile,
+        ));
+        assert!(ids.contains(&"filesystem.read".to_string()));
+        assert!(ids.contains(&"git.diff".to_string()));
+        assert!(ids.contains(&"search.grep".to_string()));
+        assert!(!ids.contains(&"filesystem.write".to_string()));
+        assert!(!ids.contains(&"git.commit".to_string()));
+    }
+
+    #[test]
+    fn mission_classifies_file_creation_as_implementation_profile() {
+        let mission = classify_prompt("Create docs/test.md");
+        assert_eq!(mission.class, ExecutionClass::Implementation);
+        assert_eq!(mission.profile, CapabilityProfile::Implementation);
+
+        let registry = default_tool_registry_for_profiles();
+        let ids = tool_ids(resolve_profile_tools(
+            &all_allowed_policy(),
+            &registry,
+            &mission.profile,
+        ));
+        assert!(ids.contains(&"filesystem.write".to_string()));
+        assert!(ids.contains(&"directory.create".to_string()));
+        assert!(ids.contains(&"diagnostics.health".to_string()));
+    }
+
+    #[test]
+    fn mission_classifies_cargo_check_as_testing_diagnostics_profile() {
+        let mission = classify_prompt("Run cargo check.");
+        assert_eq!(mission.class, ExecutionClass::Testing);
+        assert_eq!(mission.profile, CapabilityProfile::Diagnostics);
+
+        let registry = default_tool_registry_for_profiles();
+        let ids = tool_ids(resolve_profile_tools(
+            &all_allowed_policy(),
+            &registry,
+            &mission.profile,
+        ));
+        assert!(ids.contains(&"shell".to_string()));
+        assert!(ids.contains(&"diagnostics.health".to_string()));
+        assert!(ids.contains(&"filesystem.read".to_string()));
+        assert!(!ids.contains(&"filesystem.write".to_string()));
+    }
+
+    #[test]
+    fn mission_classifies_file_explanation_as_documentation_read_only() {
+        let mission = classify_prompt("Explain this file.");
+        assert_eq!(mission.class, ExecutionClass::Documentation);
+        assert_eq!(mission.profile, CapabilityProfile::ReadOnly);
+
+        let registry = default_tool_registry_for_profiles();
+        let ids = tool_ids(resolve_profile_tools(
+            &all_allowed_policy(),
+            &registry,
+            &mission.profile,
+        ));
+        assert!(ids.contains(&"filesystem.read".to_string()));
+        assert!(!ids.contains(&"filesystem.write".to_string()));
+        assert!(!ids.contains(&"shell".to_string()));
     }
 
     #[test]

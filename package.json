@@ -5,6 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "tauri dev",
+    "runtime:setup": "scripts/macos/setup-local-signing.sh",
+    "runtime:build": "scripts/macos/build-dev-runtime.sh",
+    "runtime:launch": "scripts/macos/launch-dev-runtime.sh",
+    "runtime:certify": "scripts/macos/runtime-certification-loop.sh",
     "vite:dev": "vite --host 127.0.0.1",
     "build": "vite build",
     "typecheck": "tsc --noEmit",

@@ -7,8 +7,6 @@ use builderboard_lib::auth::{CredentialService, OAuthService};
 use builderboard_lib::project_scope_cache::ProjectScopeCache;
 use builderboard_lib::projects::repository::ProjectRepository;
 use builderboard_lib::storage::commands::message_create_with_database;
-use builderboard_lib::stream_execution::stream_chat_with_services;
-use builderboard_lib::stream_persistence::StreamPersistenceService;
 use builderboard_lib::storage::db::Database;
 use builderboard_lib::storage::error::StorageResult;
 use builderboard_lib::storage::models::{CreatePaneRequest, MessageCreateRequest};
@@ -16,6 +14,8 @@ use builderboard_lib::storage::repositories::accounts::AccountRepository;
 use builderboard_lib::storage::repositories::messages::MessageRepository;
 use builderboard_lib::storage::repositories::panes::PaneRepository;
 use builderboard_lib::storage::repositories::workspaces::WorkspaceRepository;
+use builderboard_lib::stream_execution::stream_chat_with_services;
+use builderboard_lib::stream_persistence::StreamPersistenceService;
 
 fn test_database_path(name: &str) -> StorageResult<PathBuf> {
     let base = std::env::temp_dir().join("builderboard-tests");
@@ -396,15 +396,23 @@ fn live_workspace_isolation_with_model_metadata_restart() -> StorageResult<()> {
                     let root = std::env::temp_dir().join("builderboard-phase5b-a");
                     let _ = fs::remove_dir_all(&root);
                     fs::create_dir_all(&root)?;
-                    ProjectRepository::create_from_folder(connection, &root.display().to_string(), true)?
-                        .id
+                    ProjectRepository::create_from_folder(
+                        connection,
+                        &root.display().to_string(),
+                        true,
+                    )?
+                    .id
                 };
                 let project_b = {
                     let root = std::env::temp_dir().join("builderboard-phase5b-b");
                     let _ = fs::remove_dir_all(&root);
                     fs::create_dir_all(&root)?;
-                    ProjectRepository::create_from_folder(connection, &root.display().to_string(), true)?
-                        .id
+                    ProjectRepository::create_from_folder(
+                        connection,
+                        &root.display().to_string(),
+                        true,
+                    )?
+                    .id
                 };
 
                 let pane_a = PaneRepository::create(

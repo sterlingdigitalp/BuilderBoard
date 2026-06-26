@@ -12,6 +12,7 @@ pub mod engine;
 pub mod event;
 pub mod grok_build;
 pub mod manager;
+pub mod mission_metrics;
 pub mod request;
 pub mod tool_engine;
 pub mod tool_transport;
@@ -31,6 +32,7 @@ pub use capability_resolver::{
 pub use context::ExecutionContext;
 pub use event::ExecutionEvent;
 pub use manager::{ExecutionClass, ExecutionManager, ExecutionProfile, ExecutionResolution};
+pub use mission_metrics::{MissionMetrics, MissionMetricsSummary, MissionResult};
 pub use request::ExecutionRequest;
 pub use tool_transport::{native_tool_definitions, NativeToolCall, NativeToolDefinition};
 

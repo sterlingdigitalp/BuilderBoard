@@ -6,12 +6,13 @@ use tokio::sync::mpsc;
 use crate::auth::{CredentialService, OAuthService};
 use crate::chat::ProviderResolutionService;
 use crate::execution::capability_resolver::{
-    build_tool_advertisement, parse_tool_calls, resolve_allowed_tools, summarize_capabilities,
+    build_tool_advertisement, classify_mission, parse_tool_calls, resolve_profile_tools,
+    summarize_capabilities,
 };
 use crate::execution::tools::context::ToolContext;
 use crate::execution::{
     global_engine_registry, native_tool_definitions, ExecutionContext, ExecutionEvent,
-    ExecutionManager, ExecutionRequest,
+    ExecutionManager, ExecutionRequest, MissionMetrics,
 };
 use crate::filesystem_tools::perf::{trace_perf_metric, PerfSpan};
 use crate::models::{Message, MessageRole};
@@ -60,6 +61,14 @@ pub async fn run_background_stream_chat<R: Runtime>(
     .await
     {
         let message = error.to_string();
+        let mut mission_metrics = MissionMetrics::start();
+        mission_metrics.complete_failed("runtime_error", message.clone());
+        let metrics_block = format!("\n\n---\n\n{}", mission_metrics.render_block());
+        let _ = stream_persistence.enqueue_append(
+            &job.pane_id,
+            &job.assistant_message_id,
+            metrics_block,
+        );
         let _ = stream_persistence.enqueue_error(
             &job.pane_id,
             &job.assistant_message_id,
@@ -131,6 +140,7 @@ pub async fn run_background_stream_chat_inner<R: Runtime>(
 ) -> Result<(), StorageError> {
     let total_span = PerfSpan::start("TOTAL_REQUEST_DURATION_MS");
     let ttft_span = PerfSpan::start("TTFT_MS");
+    let mut mission_metrics = MissionMetrics::start();
 
     trace_runtime_phase("stream_chat_prepare", "start");
     let prepared = database.with_connection_labeled("stream_chat_prepare", |connection| {
@@ -199,6 +209,7 @@ pub async fn run_background_stream_chat_inner<R: Runtime>(
     };
 
     let exec_request = ExecutionRequest::chat(conversation.clone(), job.reasoning_level.clone());
+    let mission = classify_mission(&conversation);
 
     let route_id = job.builder_id.as_deref().unwrap_or(&job.provider_id);
     let resolution = ExecutionManager::resolve_stream_route(
@@ -227,6 +238,10 @@ pub async fn run_background_stream_chat_inner<R: Runtime>(
             "model": resolution.model,
             "effort": resolution.effort,
             "reason": resolution.reason,
+            "mission": mission.mission,
+            "mission_class": mission.class.as_str(),
+            "capability_profile": mission.profile.as_str(),
+            "mission_reason": mission.reason,
         }),
     );
 
@@ -262,6 +277,10 @@ pub async fn run_background_stream_chat_inner<R: Runtime>(
             "capability_resolver",
             serde_json::json!({
                 "execution_id": job.assistant_message_id,
+                "mission": mission.mission,
+                "mission_class": mission.class.as_str(),
+                "capability_profile": mission.profile.as_str(),
+                "mission_reason": mission.reason,
                 "summary": audit.summary(),
                 "registered_count": audit.registered_count,
                 "allowed_count": audit.allowed_count,
@@ -288,7 +307,7 @@ pub async fn run_background_stream_chat_inner<R: Runtime>(
         let reg_lock = reg
             .read()
             .map_err(|e| StorageError::InvalidInput(format!("ToolRegistry lock error: {}", e)))?;
-        resolve_allowed_tools(&routing_context.policy, &reg_lock)
+        resolve_profile_tools(&routing_context.policy, &reg_lock, &mission.profile)
     };
     let tool_summary = summarize_capabilities(&allowed_tools);
     trace_runtime_phase(
@@ -318,6 +337,10 @@ pub async fn run_background_stream_chat_inner<R: Runtime>(
         "tool_advertisement",
         serde_json::json!({
             "execution_id": job.assistant_message_id,
+            "mission": mission.mission,
+            "execution_class": mission.class.as_str(),
+            "capability_profile": mission.profile.as_str(),
+            "mission_reason": mission.reason,
             "transport": if use_native_tools { "native" } else { "markdown" },
             "advertised_tool_count": allowed_tools.len(),
             "advertised_tools": allowed_tools.iter().map(|tool| tool.id().to_string()).collect::<Vec<_>>(),
@@ -327,6 +350,7 @@ pub async fn run_background_stream_chat_inner<R: Runtime>(
             })).collect::<Vec<_>>(),
         }),
     );
+    mission_metrics.record_planning_complete();
     // ===== End Capability Resolution =====
 
     // ===== Phase 9A.3: Tool Call Loop =====
@@ -366,6 +390,7 @@ pub async fn run_background_stream_chat_inner<R: Runtime>(
         );
 
         // Execute engine and collect events without streaming to frontend
+        let llm_started = std::time::Instant::now();
         let (collected_text, native_tool_calls, exec_error) = {
             let (tx, mut rx) = mpsc::unbounded_channel::<ExecutionEvent>();
             let mut text_parts: Vec<String> = Vec::new();
@@ -428,9 +453,11 @@ pub async fn run_background_stream_chat_inner<R: Runtime>(
             let (text, tool_calls) = collector.await.unwrap_or_default();
             (text, tool_calls, result)
         };
+        mission_metrics.record_llm_generation(llm_started.elapsed());
 
         if let Err(error) = exec_error {
             let message = format!("Engine execution error: {error:?}");
+            mission_metrics.complete_failed("engine_execution_error", message.clone());
             trace_runtime_phase("tool_loop_error", &message);
             crate::native_tool_trace::event(
                 "loop_round_error",
@@ -451,6 +478,9 @@ pub async fn run_background_stream_chat_inner<R: Runtime>(
         } else {
             parse_tool_calls(&collected_text)
         };
+        for (tool_name, _) in &tool_calls {
+            mission_metrics.record_tool_call_detected(tool_name, round_number);
+        }
         trace_runtime_phase(
             "tool_loop_round",
             &format!(
@@ -478,6 +508,7 @@ pub async fn run_background_stream_chat_inner<R: Runtime>(
         );
 
         if tool_calls.is_empty() {
+            mission_metrics.complete_success();
             final_text = Some(collected_text);
             crate::native_tool_trace::write_conversation(
                 round_number,
@@ -505,6 +536,7 @@ pub async fn run_background_stream_chat_inner<R: Runtime>(
                     Some(t) => t,
                     None => {
                         let msg = format!("Unknown tool '{}'", tool_name);
+                        mission_metrics.record_tool_failure();
                         trace_runtime_phase("tool_invocation_error", &msg);
                         crate::native_tool_trace::event(
                             "tool_registry_lookup",
@@ -541,6 +573,7 @@ pub async fn run_background_stream_chat_inner<R: Runtime>(
 
                 if let Err(validation_error) = tool.validate(arguments) {
                     let msg = format!("Validation failed: {}", validation_error);
+                    mission_metrics.record_tool_failure();
                     trace_runtime_phase("tool_validation_error", &msg);
                     crate::native_tool_trace::event(
                         "tool_validation",
@@ -573,6 +606,7 @@ pub async fn run_background_stream_chat_inner<R: Runtime>(
                 );
 
                 let tool_started = crate::native_tool_trace::now();
+                let tool_metrics_started = std::time::Instant::now();
                 crate::native_tool_trace::event(
                     "tool_execution_started",
                     serde_json::json!({
@@ -644,6 +678,13 @@ pub async fn run_background_stream_chat_inner<R: Runtime>(
                         })),
                     }),
                 );
+                mission_metrics.record_tool_completion(
+                    tool_metrics_started.elapsed(),
+                    exec_result
+                        .as_ref()
+                        .map(|result| result.success)
+                        .unwrap_or(false),
+                );
 
                 (tool_name.clone(), exec_result)
             };
@@ -711,7 +752,12 @@ pub async fn run_background_stream_chat_inner<R: Runtime>(
         );
     }
 
-    let final_response = final_text.unwrap_or_else(|| {
+    let final_response = if let Some(text) = final_text {
+        text
+    } else {
+        let failure_message =
+            "Maximum number of tool call rounds reached. Please refine your request.";
+        mission_metrics.complete_failed("max_tool_rounds", failure_message);
         crate::native_tool_trace::event(
             "loop_max_rounds_reached",
             serde_json::json!({
@@ -724,8 +770,22 @@ pub async fn run_background_stream_chat_inner<R: Runtime>(
                 })),
             }),
         );
-        "Maximum number of tool call rounds reached. Please refine your request.".to_string()
-    });
+        failure_message.to_string()
+    };
+    let mission_metrics_summary = mission_metrics.summary();
+    crate::native_tool_trace::event(
+        "mission_metrics",
+        serde_json::json!({
+            "execution_id": job.assistant_message_id,
+            "pane_id": job.pane_id,
+            "metrics": mission_metrics_summary,
+        }),
+    );
+    let final_response = format!(
+        "{}\n\n---\n\n{}",
+        final_response.trim_end(),
+        mission_metrics.render_block()
+    );
     trace_runtime_phase("tool_loop", "complete");
     // ===== End Tool Call Loop =====
 

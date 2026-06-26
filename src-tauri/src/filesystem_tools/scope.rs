@@ -58,6 +58,70 @@ impl ApprovedScope {
         }
 
         let requested = Path::new(requested_path);
+        if requested.is_absolute() {
+            let canonical = requested.canonicalize().map_err(|error| {
+                FilesystemError::NotFound(format!(
+                    "failed to resolve path {}: {error}",
+                    requested_path
+                ))
+            })?;
+            if !is_within_root(&canonical, &self.canonical_root) {
+                return Err(FilesystemError::PathEscape(requested_path.to_string()));
+            }
+            return Ok(canonical);
+        }
+
+        let mut resolved = self.canonical_root.clone();
+        for component in requested.components() {
+            match component {
+                Component::CurDir => {}
+                Component::Normal(part) => resolved.push(part),
+                Component::ParentDir => {
+                    if resolved == self.canonical_root {
+                        return Err(FilesystemError::PathEscape(requested_path.to_string()));
+                    }
+                    resolved.pop();
+                    if !is_within_root(&resolved, &self.canonical_root) {
+                        return Err(FilesystemError::PathEscape(requested_path.to_string()));
+                    }
+                }
+                Component::RootDir | Component::Prefix(_) => {
+                    return Err(FilesystemError::PathEscape(requested_path.to_string()));
+                }
+            }
+        }
+
+        let canonical = resolved.canonicalize().map_err(|error| {
+            FilesystemError::NotFound(format!(
+                "failed to resolve path {}: {error}",
+                requested_path
+            ))
+        })?;
+
+        if !is_within_root(&canonical, &self.canonical_root) {
+            return Err(FilesystemError::PathEscape(requested_path.to_string()));
+        }
+
+        Ok(canonical)
+    }
+
+    pub fn resolve_existing_path(&self, requested_path: &str) -> FilesystemResult<PathBuf> {
+        self.resolve_path(requested_path)
+    }
+
+    pub fn resolve_create_path(&self, requested_path: &str) -> FilesystemResult<PathBuf> {
+        let requested_path = requested_path.trim();
+        if requested_path.contains('\0') {
+            return Err(FilesystemError::InvalidInput(
+                "path contains null byte".to_string(),
+            ));
+        }
+
+        if requested_path.is_empty() || requested_path == "." {
+            return Ok(self.canonical_root.clone());
+        }
+
+        let requested = Path::new(requested_path);
         let absolute_path = if requested.is_absolute() {
             requested.to_path_buf()
         } else {
@@ -92,14 +156,6 @@ impl ApprovedScope {
         }
 
         Ok(canonical)
-    }
-
-    pub fn resolve_existing_path(&self, requested_path: &str) -> FilesystemResult<PathBuf> {
-        let path = self.resolve_path(requested_path)?;
-        if !path.exists() {
-            return Err(FilesystemError::NotFound(requested_path.to_string()));
-        }
-        Ok(path)
     }
 }
 
@@ -202,12 +258,8 @@ mod tests {
         // Use the platform-specific way to represent absolute paths
         let absolute_request = new_file_path.to_string_lossy().to_string();
 
-        let resolved = scope.resolve_path(&absolute_request).expect("resolve should succeed for absolute create path within scope");
+        let resolved = scope.resolve_create_path(&absolute_request).expect("resolve should succeed for absolute create path within scope");
 
-        // On macOS /var is symlinked to /private/var, so the canonical root may contain /private
-        // while the provided absolute string might not if constructed from a non-canonical base,
-        // but since root is already canonicalized, root.join() will be canonical prefix.
-        // canonicalize_longest_prefix handles returning a canonical path.
         assert_eq!(resolved, new_file_path);
     }
 

@@ -29,3 +29,9 @@ This document details every place where BuilderBoard's current runtime architect
 *   **Impact Rank:** 5 (Breaks Independence/Scalability)
 *   **Divergence:** Independence requires that "Builders do not interfere with one another."
 *   **Effect:** `src-tauri/src/execution/tools/registry.rs` uses a global singleton `LazyLock<Arc<RwLock<ToolRegistry>>>`. Although it is an `RwLock`, having a single global registry rather than per-pane or per-workspace registries limits future capabilities for pane-specific tool configurations or isolated dynamic tool loading, and can introduce contention during initialization or tool resolution.
+
+
+### 6. Missing Tool Permission Audit Trail (Capability Gap)
+*   **Impact Rank:** 6 (Breaks Security/User Control)
+*   **Divergence:** Phase 8.9D/8.9C architectures and Builder rules demand that tool permissions MUST be explicit, reviewable, and auditable at runtime. The UX must surface what tools a Builder is requesting and let the user approve/deny/permit-per-session.
+*   **Effect:** Currently, the system has an incomplete implementation of the tool permission auditing capability, preventing the user from retaining full auditable control of all Builders.

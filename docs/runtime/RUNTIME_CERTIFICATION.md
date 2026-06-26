@@ -12,7 +12,37 @@
 | **Certification Date** | 2026-06-26 |
 | **Phase 0 Score** | 0% (initial — no formal certification executed) |
 | **Certification Level** | None (Not Certified) |
-| **Certification Authority** | Builder C (pending) |
+
+## Who Certifies What
+
+Certification requires two independent authorities with non-overlapping responsibilities:
+
+| Role | Certifies | Does NOT Certify |
+|------|-----------|-----------------|
+| **Builder C** | Architecture soundness. Implementation correctness. Olympic event design. | Runtime behavior. Live application performance. |
+| **Builder V** | Runtime behavior. Olympic event results. Ledger status accuracy. | Implementation correctness. Code quality. Unit test coverage. |
+
+**Certification requires both.** Builder C certifies that the right thing was built. Builder V certifies that it works in the running application. Neither can substitute for the other.
+
+## Certification Process
+
+```
+Builder T executes Regression Olympics against running application
+    ↓
+Builder T produces test report with PASS/FAIL per event
+    ↓
+Builder V independently validates each result
+    ↓
+Builder V produces validation report with CONFIRMED/DISPUTED
+    ↓
+Builder C reviews both reports and ledger
+    ↓
+Builder C issues certification at Bronze/Silver/Gold level
+    ↓
+RUNTIME_CERTIFICATION.md updated
+    ↓
+Certification snapshot filed in docs/runtime/certification/
+```
 
 ## Passed Events
 
@@ -53,18 +83,16 @@
 | Bronze events executed | Testing | Pending |
 | Silver events executed | Testing | Pending |
 | Gold events executed | Testing | Pending |
-| Builder T trained on Runtime First philosophy | Training | Pending |
 | First formal certification issued | Certification | Pending |
-| Automation plan reviewed | Process | Pending |
 
 ## Certification Authority
 
-| Role | Holder | Signed |
-|------|--------|--------|
-| Builder T | TBD | — |
-| Builder V | TBD | — |
-| Builder C | TBD | — |
+| Role | Holder | Certifies |
+|------|--------|-----------|
+| Builder T | TBD | Olympic event execution |
+| Builder V | TBD | Runtime behavior validation |
+| Builder C | TBD | Architecture + certification issuance |
 
 ---
 
-*To begin certification: Builder T executes Bronze Olympic events against the running application and records results in the ledger.*
+*To begin certification: Builder T executes Bronze Olympic events against the running application and records results in the ledger. Builder V independently validates. Builder C issues certification.*

@@ -49,10 +49,9 @@ impl Tool for ListTool {
             .and_then(|v| v.as_str())
             .map_or(false, |s| !s.is_empty())
         {
-            Ok(())
-        } else {
-            Err("Missing required argument: 'path'".to_string())
+            return Err("Missing required argument: 'path'".to_string());
         }
+        Ok(())
     }
 
     fn execute(
@@ -195,10 +194,9 @@ impl Tool for CreateTool {
             .and_then(|v| v.as_str())
             .map_or(false, |s| !s.is_empty())
         {
-            Ok(())
-        } else {
-            Err("Missing required argument: 'path'".to_string())
+            return Err("Missing required argument: 'path'".to_string());
         }
+        Ok(())
     }
 
     fn execute(
@@ -218,7 +216,7 @@ impl Tool for CreateTool {
             args: path.to_string(),
         });
 
-        let resolved = resolve_dir_path(&ctx, path)?;
+        let resolved = resolve_create_dir_path(&ctx, path)?;
 
         std::fs::create_dir_all(&resolved)
             .map_err(|e| format!("Failed to create directory '{}': {}", resolved.display(), e))?;
@@ -309,5 +307,37 @@ fn resolve_dir_path(ctx: &ToolContext, path_str: &str) -> Result<PathBuf, String
         } else {
             Err("Relative paths require a project_root or cwd in context".to_string())
         }
+    }
+}
+
+fn resolve_create_dir_path(ctx: &ToolContext, path_str: &str) -> Result<PathBuf, String> {
+    let path = PathBuf::from(path_str);
+    if path.is_absolute() {
+        if let Some(ref scope) = ctx.filesystem_scope {
+            scope.resolve_create_path(path_str).map_err(|_| {
+                format!(
+                    "Path '{}' is outside the approved filesystem scope",
+                    path_str
+                )
+            })
+        } else {
+            Ok(path)
+        }
+    } else if let Some(ref root) = ctx.project_root {
+        let candidate = root.join(&path);
+        if let Some(ref scope) = ctx.filesystem_scope {
+            let candidate_str = candidate.to_string_lossy();
+            scope.resolve_create_path(&candidate_str).map_err(|_| {
+                format!(
+                    "Path '{}' (resolved to '{}') is outside the approved filesystem scope",
+                    path_str,
+                    candidate.display()
+                )
+            })
+        } else {
+            Ok(candidate)
+        }
+    } else {
+        Err("Relative paths require a project_root or cwd in context".to_string())
     }
 }

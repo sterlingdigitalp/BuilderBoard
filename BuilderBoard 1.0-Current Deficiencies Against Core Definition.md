@@ -31,8 +31,11 @@ Evidence:
 
 Ledger:
 
-* BB-0001
-* BB-0002
+* BB-0004 — Filesystem scope resolver rejects non-existent paths
+* BB-0005 — Search tool reports failure on no-match result
+* BB-0002 — Tool validation failures cause planner retry cascades
+* BB-0009 — Planner budget consumed by inefficient multi-tool sequences
+* BB-0001 — Repository-scale discovery missions exhaust planner budget
 
 ⸻
 

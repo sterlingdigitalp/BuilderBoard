@@ -53,6 +53,8 @@ for cycle in $(seq 1 "$CYCLES"); do
     exit "$build_status"
   fi
 
+  "$ROOT_DIR/scripts/macos/assert-packaged-runtime.sh"
+
   launch_started="$(now_ms)"
   open -n "$INSTALL_APP"
   launch_status="OK"

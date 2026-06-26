@@ -8,117 +8,115 @@
 
 Every change — whether a bug fix, performance improvement, or feature implementation — follows the same workflow. This workflow ensures that runtime behavior is always the primary measure of quality and that no change ships without certification.
 
+---
+
 ## The Workflow
 
 ```
-Runtime Failure or Feature Request
+Runtime Olympics (Discovery)
     │
     ▼
 ┌─────────────────────────────────────┐
-│ 1. RUNTIME LEDGER                    │
+│ 1. RUNTIME ENGINEERING LEDGER        │
 │                                     │
-│ Record the issue or request in the   │
-│ Runtime Engineering Ledger. Include: │
+│ Record the failure. Include:        │
 │ - Observed/expected behavior         │
+│ - Root cause analysis               │
 │ - Olympic event linkage              │
-│ - Affected files (where known)       │
-│ - Priority and status                │
+│ - Affected files                    │
+│ - Priority and status: OPEN         │
 └──────────────────┬──────────────────┘
                    │
                    ▼
 ┌─────────────────────────────────────┐
 │ 2. ROADMAP GATE                     │
 │                                     │
-│ Check current certification level.  │
-│ Is the runtime certified at the     │
-│ level this change requires?         │
+│ Builder C checks current            │
+│ certification level. Is the runtime │
+│ certified at the level this fix     │
+│ requires?                           │
 │                                     │
 │ ├─ YES → Proceed to architecture    │
 │ └─ NO  → Fix runtime first.        │
-│          Feature work paused.       │
 └──────────────────┬──────────────────┘
                    │
                    ▼
 ┌─────────────────────────────────────┐
-│ 3. ARCHITECTURE                      │
+│ 3. BUILDER C — ARCHITECTURE REVIEW  │
 │                                     │
-│ Design the change. Consider:        │
-│ - Does this preserve the Core       │
-│   Promise?                          │
-│ - Does this make runtime behavior   │
-│   better for the user?              │
-│ - What Olympic events will verify   │
-│   this change?                      │
+│ Validates root cause.               │
+│ Approves implementation approach.   │
+│ Identifies Olympic events for cert. │
 └──────────────────┬──────────────────┘
                    │
                    ▼
 ┌─────────────────────────────────────┐
-│ 4. IMPLEMENTATION                    │
+│ 4. JULES — IMPLEMENTATION           │
 │                                     │
-│ Write code. Follow Runtime First:   │
-│ - Implementation is fungible        │
-│ - Working runtime > clean code      │
-│ - No feature weakens the Core       │
-│   Promise                           │
+│ Writes and commits the fix.         │
+│ Runs regression tests.              │
+│ Creates Pull Request for review.    │
 └──────────────────┬──────────────────┘
                    │
                    ▼
 ┌─────────────────────────────────────┐
-│ 5. RUNTIME OLYMPICS                  │
+│ 5. BUILDER C — IMPLEMENTATION REVIEW│
 │                                     │
-│ Builder T executes Olympic events   │
-│ against the running application.    │
-│                                     │
-│ - Launch the packaged runtime       │
-│ - Execute affected events           │
-│ - Execute full suite if possible    │
-│ - Record metrics in ledger          │
+│ Confirms fix matches architecture.  │
+│ Unit tests pass. Compiler passes.   │
+│ Status: IMPLEMENTED                 │
 └──────────────────┬──────────────────┘
                    │
                    ▼
 ┌─────────────────────────────────────┐
-│ 6. VALIDATION                        │
+│ 6. BUILDER T — RUNTIME OLYMPICS     │
 │                                     │
-│ Builder V validates Builder T's     │
-│ results independently:              │
-│ - Repeat each event                 │
-│ - Attempt variations to break       │
-│ - Confirm or dispute PASS/FAIL      │
+│ Execute Olympic events linked to    │
+│ this fix against running app.       │
+│ Measure latency, correctness, etc.  │
+│ Record PASS/FAIL.                   │
+│ Status: RESOLVED (Pending Cert)     │
 └──────────────────┬──────────────────┘
                    │
                    ▼
 ┌─────────────────────────────────────┐
-│ 7. CERTIFICATION                     │
+│ 7. BUILDER V — RUNTIME VALIDATION   │
 │                                     │
-│ Builder C reviews evidence and      │
-│ issues certification:               │
-│ - Review T and V reports            │
-│ - Calculate certification score     │
-│ - Determine certification level     │
-│ - Update RUNTIME_CERTIFICATION.md   │
+│ Independently repeat each event.    │
+│ Confirm or dispute PASS/FAIL.       │
+│ Approve or reject closure.          │
+│ Status: VALIDATED (if confirmed)    │
 └──────────────────┬──────────────────┘
                    │
                    ▼
 ┌─────────────────────────────────────┐
-│ 8. RELEASE CHECKLIST                 │
+│ 8. CERTIFICATION (if tier complete) │
 │                                     │
-│ Run RUNTIME_FIRST_CHECKLIST.md:     │
+│ Builder C reviews all evidence.     │
+│ Issues certification at tier level. │
+│ Status: CLOSED (per entry)          │
+└──────────────────┬──────────────────┘
+                   │
+                   ▼
+┌─────────────────────────────────────┐
+│ 9. RELEASE CHECKLIST                 │
+│                                     │
+│ Run RUNTIME_FIRST_CHECKLIST.md.     │
+│ Builder C, T, V all sign.           │
 │ ├─ All YES → Ship                   │
 │ └─ Any NO  → Fix → Recertify       │
-└──────────────────┬──────────────────┘
-                   │
-                   ▼
-┌─────────────────────────────────────┐
-│ 9. CLOSE LEDGER                      │
-│                                     │
-│ Update the ledger entry:            │
-│ - Mark as RESOLVED or CLOSED        │
-│ - Reference certification snapshot  │
-│ - Document any lessons learned      │
 └─────────────────────────────────────┘
 ```
 
+---
+
 ## Key Principles
+
+### Implementation Truth vs Runtime Truth
+
+Implementation does not prove success. Runtime does.
+
+A fix that compiles, passes unit tests, and looks correct in code review is **implemented** — not **resolved**. Resolution requires runtime evidence: the fix must be observed working in the running application under realistic conditions.
 
 ### Runtime Failure Always Goes to the Ledger First
 
@@ -131,25 +129,37 @@ Before any code is written, the failure must be recorded in the ledger. This ens
 
 No issue is closed until the corresponding Olympic event passes against the running application. Compilation and unit test success are insufficient.
 
+Authenticated Olympic evidence must come from the packaged, locally signed runtime:
+
+```text
+/Applications/BuilderBoard Dev.app
+```
+
+Evidence from `npm run dev`, `cargo tauri dev`, or `target/debug/builderboard` is invalid for authenticated provider workflows because those binaries use unstable macOS Keychain identities.
+
 ### Certification Before Ship
 
 No release ships without current runtime certification at the appropriate level. The release checklist (`RUNTIME_FIRST_CHECKLIST.md`) must pass.
+
+---
 
 ## Role Handoff
 
 ```
 Step                  Performed By         Delivers To
 ──────────────────────────────────────────────────────
-1. Ledger             Engineer             Builder C
-2. Roadmap Gate       Builder C            Engineer
-3. Architecture       Engineer             Engineer
-4. Implementation     Engineer             Builder T
-5. Olympics           Builder T            Builder V
-6. Validation         Builder V            Builder C
-7. Certification      Builder C            Repository
-8. Release Checklist  All Builders         Repository
-9. Close Ledger       Builder C            Ledger
+1. Ledger             Anyone                Builder C
+2. Roadmap Gate       Builder C             — (decision)
+3. Architecture Rev.  Builder C             Jules
+4. Implementation     Jules                 Builder C
+5. Implementation Rev Builder C             Builder T
+6. Regression Olympics Builder T            Builder V
+7. Validation         Builder V             Builder C
+8. Certification      Builder C             Repository
+9. Release Checklist  All Builders          Repository
 ```
+
+---
 
 ## Escalation
 
@@ -165,3 +175,21 @@ If a change causes a regression (an Olympic event that previously passed now fai
 1. The regression is recorded in the ledger.
 2. All feature work stops (Engineering Law 7).
 3. The regression is fixed before any further feature development.
+
+---
+
+## Ledger State Transitions
+
+```
+OPEN
+  ↓ Architecture Review by Builder C
+IMPLEMENTED
+  ↓ Implementation Review by Builder C
+RESOLVED (Pending Runtime Certification)
+  ↓ Regression Olympics by Builder T
+VALIDATED
+  ↓ Builder V confirms runtime evidence
+CLOSED
+```
+
+Implementation alone never closes a ledger entry. Every transition from RESOLVED onward requires runtime evidence.

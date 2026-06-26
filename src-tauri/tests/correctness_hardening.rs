@@ -1,6 +1,11 @@
 use std::fs;
 
+use builderboard_lib::execution::tools::context::ToolContext;
+use builderboard_lib::execution::tools::directory::CreateTool;
+use builderboard_lib::execution::tools::filesystem::WriteTool;
+use builderboard_lib::execution::tools::traits::Tool;
 use builderboard_lib::filesystem_tools::filesystem_read_file_with_database;
+use builderboard_lib::filesystem_tools::scope::ApprovedScope;
 use builderboard_lib::projects::commands::project_create_from_folder_with_database;
 use builderboard_lib::projects::repository::ProjectRepository;
 use builderboard_lib::storage::db::Database;
@@ -138,4 +143,115 @@ fn closed_pane_cannot_be_reopened_by_get_open_by_id() {
     let result =
         database.with_connection(|connection| PaneRepository::get_open_by_id(connection, &pane_id));
     assert!(result.is_err());
+}
+
+fn scoped_tool_context(root: &std::path::Path) -> ToolContext {
+    let mut ctx = ToolContext::local("correctness-scope-test");
+    ctx.project_root = Some(root.to_path_buf());
+    ctx.filesystem_scope = Some(ApprovedScope::new(root).expect("approved scope"));
+    ctx
+}
+
+#[test]
+fn filesystem_write_can_create_new_file_inside_approved_scope() {
+    let root = std::env::temp_dir().join("builderboard-correctness-write-create");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).expect("create root");
+
+    let tool = WriteTool;
+    let result = tool
+        .execute(
+            scoped_tool_context(&root),
+            serde_json::json!({
+                "path": "docs/test.md",
+                "content": "created"
+            }),
+            &|_| {},
+        )
+        .expect("write tool should create new path");
+
+    assert!(result.success);
+    assert_eq!(
+        fs::read_to_string(root.join("docs/test.md")).expect("read created file"),
+        "created"
+    );
+}
+
+#[test]
+fn directory_create_can_create_nested_directory_inside_approved_scope() {
+    let root = std::env::temp_dir().join("builderboard-correctness-dir-create");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).expect("create root");
+
+    let tool = CreateTool;
+    assert!(tool
+        .validate(&serde_json::json!({ "path": "docs/nested" }))
+        .is_ok());
+    let result = tool
+        .execute(
+            scoped_tool_context(&root),
+            serde_json::json!({ "path": "docs/nested" }),
+            &|_| {},
+        )
+        .expect("directory create should create new path");
+
+    assert!(result.success);
+    assert!(root.join("docs/nested").is_dir());
+}
+
+#[test]
+fn filesystem_write_rejects_traversal_create_path() {
+    let root = std::env::temp_dir().join("builderboard-correctness-write-traversal");
+    let outside = std::env::temp_dir().join("builderboard-correctness-write-traversal-outside.md");
+    let _ = fs::remove_dir_all(&root);
+    let _ = fs::remove_file(&outside);
+    fs::create_dir_all(&root).expect("create root");
+
+    let tool = WriteTool;
+    let result = tool.execute(
+        scoped_tool_context(&root),
+        serde_json::json!({
+            "path": "../builderboard-correctness-write-traversal-outside.md",
+            "content": "escape"
+        }),
+        &|_| {},
+    );
+
+    assert!(result.is_err());
+    assert!(!outside.exists());
+}
+
+#[test]
+fn filesystem_write_rejects_symlink_parent_escape() {
+    let root = std::env::temp_dir().join("builderboard-correctness-write-symlink");
+    let outside = std::env::temp_dir().join("builderboard-correctness-write-outside");
+    let _ = fs::remove_dir_all(&root);
+    let _ = fs::remove_dir_all(&outside);
+    fs::create_dir_all(&root).expect("create root");
+    fs::create_dir_all(&outside).expect("create outside");
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::symlink;
+        symlink(&outside, root.join("escape")).expect("create symlink");
+    }
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::symlink_dir;
+        symlink_dir(&outside, root.join("escape")).expect("create symlink");
+    }
+
+    let tool = WriteTool;
+    let result = tool.execute(
+        scoped_tool_context(&root),
+        serde_json::json!({
+            "path": "escape/new.md",
+            "content": "escape"
+        }),
+        &|_| {},
+    );
+
+    assert!(result.is_err());
+    assert!(!outside.join("new.md").exists());
 }

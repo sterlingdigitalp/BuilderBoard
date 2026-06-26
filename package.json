@@ -4,11 +4,12 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "tauri dev",
+    "dev": "echo \"BuilderBoard dev mode is for unauthenticated UI work only. Use npm run runtime:build -- --launch for authenticated runtime testing.\" && tauri dev",
     "runtime:setup": "scripts/macos/setup-local-signing.sh",
     "runtime:build": "scripts/macos/build-dev-runtime.sh",
     "runtime:launch": "scripts/macos/launch-dev-runtime.sh",
     "runtime:certify": "scripts/macos/runtime-certification-loop.sh",
+    "runtime:keychain:reset": "scripts/macos/reset-builderboard-keychain.sh",
     "vite:dev": "vite --host 127.0.0.1",
     "build": "vite build",
     "typecheck": "tsc --noEmit",

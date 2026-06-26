@@ -51,9 +51,37 @@ if [[ "$FORCE" == "1" ]]; then
   security delete-certificate -c "$IDENTITY_NAME" "$KEYCHAIN_PATH" >/dev/null 2>&1 || true
 fi
 
+verify_identity_trust() {
+  local test_binary="$WORK_DIR/sign-test-existing"
+  cp /bin/echo "$test_binary"
+  codesign --force --timestamp=none --sign "$IDENTITY_NAME" "$test_binary" >/dev/null
+  codesign --verify --strict --verbose=2 "$test_binary" >/dev/null 2>&1
+}
+
 if [[ "$FORCE" != "1" ]] && security find-identity -v -p codesigning "$KEYCHAIN_PATH" 2>/dev/null | grep -Fq "\"$IDENTITY_NAME\""; then
-  echo "Found local BuilderBoard signing identity: $IDENTITY_NAME"
-  exit 0
+  if verify_identity_trust; then
+    echo "Found trusted local BuilderBoard signing identity: $IDENTITY_NAME"
+    exit 0
+  fi
+
+  echo "Found local signing identity, but strict macOS verification does not trust it."
+  echo "Repairing local certificate trust for code signing."
+  EXISTING_CERT_PATH="$WORK_DIR/builderboard-existing-local-dev.crt"
+  security find-certificate -c "$IDENTITY_NAME" -p "$KEYCHAIN_PATH" >"$EXISTING_CERT_PATH"
+  security add-trusted-cert \
+    -r trustRoot \
+    -p codeSign \
+    -k "$KEYCHAIN_PATH" \
+    "$EXISTING_CERT_PATH"
+
+  if verify_identity_trust; then
+    echo "Local BuilderBoard signing identity trust repaired: $IDENTITY_NAME"
+    exit 0
+  fi
+
+  echo "Unable to repair trust for '$IDENTITY_NAME'." >&2
+  echo "Run: npm run runtime:setup -- --force" >&2
+  exit 1
 fi
 
 OPENSSL_CONFIG="$WORK_DIR/openssl.cnf"

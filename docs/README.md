@@ -21,7 +21,7 @@ The complete framework for testing, validating, and certifying runtime behavior.
 | Document | Purpose |
 |----------|---------|
 | `runtime/CORE_PROMISE.md` | The single reason BuilderBoard exists |
-| `runtime/ENGINEERING_LAWS.md` | Seven permanent engineering principles |
+| `runtime/ENGINEERING_LAWS.md` | Twelve permanent engineering principles |
 | `runtime/PHASE0_OLYMPICS.md` | 14 Olympic events defining runtime requirements |
 | `runtime/RUNTIME_ENGINEERING_GUIDE.md` | Runtime First engineering philosophy handbook |
 | `runtime/RUNTIME_WORKFLOW.md` | Complete runtime lifecycle workflow |
@@ -31,7 +31,8 @@ The complete framework for testing, validating, and certifying runtime behavior.
 | `runtime/AUTOMATION_PLAN.md` | Future automation architecture |
 | `runtime/BUILDER_T.md` | Runtime Test Engineer role |
 | `runtime/BUILDER_V.md` | Validation Engineer role |
-| `runtime/BUILDER_C.md` | Runtime Certifier role |
+| `runtime/BUILDER_C.md` | Architecture and Implementation Reviewer role |
+| `../JULES.md` | Implementation Engineer (Jules) role |
 | `runtime/templates/` | 7 reusable templates for events, ledger, reports |
 
 ## Architecture

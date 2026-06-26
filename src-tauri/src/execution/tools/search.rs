@@ -162,10 +162,11 @@ fn run_search_command(
         cmd.arg(root);
 
         if let Ok(output) = cmd.output() {
+            let success = matches!(output.status.code(), Some(0) | Some(1));
             return (
                 String::from_utf8_lossy(&output.stdout).to_string(),
                 String::from_utf8_lossy(&output.stderr).to_string(),
-                output.status.success(),
+                success,
             );
         }
     }
@@ -182,10 +183,11 @@ fn run_search_command(
     cmd.arg(root.to_string_lossy().as_ref());
 
     if let Ok(output) = cmd.output() {
+        let success = matches!(output.status.code(), Some(0) | Some(1));
         (
             String::from_utf8_lossy(&output.stdout).to_string(),
             String::from_utf8_lossy(&output.stderr).to_string(),
-            output.status.success(),
+            success,
         )
     } else {
         (String::new(), "grep not found".to_string(), false)
@@ -377,5 +379,54 @@ fn resolve_search_root(ctx: &ToolContext, path: Option<&str>) -> Result<PathBuf,
             .or_else(|| ctx.cwd.clone())
             .or_else(|| std::env::current_dir().ok())
             .ok_or_else(|| "No search root available".to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("builderboard-search-{name}"));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("create temp dir");
+        dir
+    }
+
+    #[test]
+    fn grep_existing_pattern_succeeds() {
+        let root = temp_dir("existing-pattern");
+        fs::write(root.join("main.rs"), "fn main() {}\n").expect("write fixture");
+
+        let (stdout, stderr, success) = run_search_command("fn main", &root, 10, true, 0, None);
+
+        assert!(success, "search should succeed: {stderr}");
+        assert!(stdout.contains("main.rs"));
+    }
+
+    #[test]
+    fn grep_missing_pattern_succeeds_with_empty_result() {
+        let root = temp_dir("missing-pattern");
+        fs::write(root.join("main.rs"), "fn main() {}\n").expect("write fixture");
+
+        let (stdout, stderr, success) =
+            run_search_command("NO_SUCH_SYMBOL_BB_0005", &root, 10, true, 0, None);
+
+        assert!(
+            success,
+            "no-match search should not be a tool failure: {stderr}"
+        );
+        assert!(stdout.is_empty());
+    }
+
+    #[test]
+    fn grep_invalid_pattern_remains_failure() {
+        let root = temp_dir("invalid-pattern");
+        fs::write(root.join("main.rs"), "fn main() {}\n").expect("write fixture");
+
+        let (_, _, success) = run_search_command("[", &root, 10, false, 0, None);
+
+        assert!(!success, "invalid regex should remain a search failure");
     }
 }

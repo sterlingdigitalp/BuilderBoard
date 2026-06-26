@@ -16,7 +16,7 @@ Each Builder operates independently — its own repository, conversation, model,
 
 This promise is the single measure of the product. Everything else is subordinate.
 
-A permanent definition of this promise is maintained in [`CORE_PROMISE.md`](docs/runtime/CORE_PROMISE.md) and governed by seven [`ENGINEERING_LAWS.md`](docs/runtime/ENGINEERING_LAWS.md).
+A permanent definition of this promise is maintained in [`CORE_PROMISE.md`](docs/runtime/CORE_PROMISE.md) and governed by twelve [`ENGINEERING_LAWS.md`](docs/runtime/ENGINEERING_LAWS.md).
 
 ## Version 1
 
@@ -53,7 +53,11 @@ The complete Runtime Certification Framework is in [`docs/runtime/`](docs/runtim
 
 ## Engineering Ledger
 
-Runtime failures and engineering issues are tracked in the [`RUNTIME_ENGINEERING_LEDGER.md`](./RUNTIME_ENGINEERING_LEDGER.md). This is the authoritative list of what needs fixing.
+Runtime failures and engineering issues are tracked in the [`RUNTIME_ENGINEERING_LEDGER.md`](./RUNTIME_ENGINEERING_LEDGER.md). This is the authoritative engineering backlog for BuilderBoard Version 1.
+
+Each ledger entry represents one independently fixable runtime problem with explicit dependencies, Olympic event linkage, verification source, and success criteria. The normalization that produced this structure is documented in [`LEDGER_NORMALIZATION_SUMMARY.md`](./LEDGER_NORMALIZATION_SUMMARY.md). Status changes from Builder C's stabilization sprint are in [`LEDGER_REVISION_2_SUMMARY.md`](./LEDGER_REVISION_2_SUMMARY.md).
+
+**Current state:** 2 CLOSED, 2 RESOLVED (Pending Certification), 2 PARTIALLY RESOLVED, 5 OPEN.
 
 ## Quick Start
 
@@ -78,6 +82,14 @@ npm run runtime:build
 
 # Launch the application
 npm run runtime:launch
+```
+
+Use the packaged runtime for authenticated work; `npm run dev` is only for unauthenticated UI development. If macOS keeps asking for Keychain access after prior debug-runtime use, reset stale BuilderBoard Keychain entries, then reconnect accounts from the packaged app:
+
+```sh
+npm run runtime:keychain:reset -- --dry-run
+npm run runtime:keychain:reset -- --yes
+npm run runtime:build -- --launch
 ```
 
 See [`LOCAL_DEVELOPMENT_RUNTIME.md`](./LOCAL_DEVELOPMENT_RUNTIME.md) for detailed instructions, including troubleshooting common macOS Keychain issues.

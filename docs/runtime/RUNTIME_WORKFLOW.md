@@ -2,109 +2,109 @@
 
 ## The Complete Runtime Lifecycle
 
-This document describes the canonical BuilderBoard testing and certification pipeline.
+This document describes the canonical BuilderBoard engineering and certification lifecycle.
 
 ---
 
-## Lifecycle Diagram
+## Canonical Engineering Lifecycle
 
 ```
                     ┌─────────────────────────────────────────────────────┐
-                    │              USER MISSION / FEATURE REQUEST          │
-                    │  "I want BuilderBoard to do X for a real user."     │
+                    │         RUNTIME OLYMPICS (DISCOVERY)                │
+                    │  Builder T explores runtime behavior, finds         │
+                    │  failures, challenges assumptions.                  │
                     └──────────────────────┬──────────────────────────────┘
-                                           │
-                                           ▼
+                                            │
+                                            ▼
                     ┌─────────────────────────────────────────────────────┐
-                    │              ROADMAP GATE                          │
-                    │  Is runtime certified at the level this feature     │
-                    │  requires? (see RUNTIME_ENGINEERING_GUIDE.md)      │
+                    │         RUNTIME ENGINEERING LEDGER                  │
+                    │  Failure recorded: root cause, Olympic linkage,     │
+                    │  affected files, Verification Source.               │
+                    │  Status: OPEN                                       │
+                    └──────────────────────┬──────────────────────────────┘
+                                            │
+                                            ▼
+                    ┌─────────────────────────────────────────────────────┐
+                    │         ROADMAP GATE                                │
+                    │  Is runtime certified at the level this fix         │
+                    │  requires?                                         │
                     ├─────────────────────────────────────────────────────┤
                     │  ✓ Certified → Proceed                             │
-                    │  ✗ Not certified → Pause. Fix runtime first.      │
+                    │  ✗ Not certified → Fix runtime first.              │
                     └──────────────────────┬──────────────────────────────┘
-                                           │
-                                           ▼
+                                            │
+                                            ▼
                     ┌─────────────────────────────────────────────────────┐
-                    │              IMPLEMENTATION PHASE                   │
-                    │  Engineers build / modify / fix runtime code.       │
-                    │  No testing occurs during this phase.               │
+                    │         BUILDER C — ARCHITECTURE REVIEW             │
+                    │  Validates root cause. Approves approach.           │
+                    │  Identifies Olympic events for certification.       │
                     └──────────────────────┬──────────────────────────────┘
-                                           │
-                                           ▼
+                                            │
+                                            ▼
                     ┌─────────────────────────────────────────────────────┐
-                    │              BUILDER T — EXECUTION                  │
-                    │                                                    │
-                    │  1. Read Olympic event definition                  │
-                    │  2. Launch BuilderBoard                            │
-                    │  3. Execute event against running application       │
-                    │  4. Record metrics                                 │
-                    │  5. Determine PASS/FAIL                            │
-                    │  6. Document observations                          │
+                    │         JULES — IMPLEMENTATION                      │
+                    │  Writes and commits the fix.                        │
+                    │  Runs regression tests.                             │
+                    │  Creates Pull Request.                              │
                     └──────────────────────┬──────────────────────────────┘
-                                           │
-                                           ▼
+                                            │
+                                            ▼
                     ┌─────────────────────────────────────────────────────┐
-                    │              RUNTIME LEDGER                         │
-                    │                                                    │
-                    │  Builder T records:                                │
-                    │  - Event ID & name                                 │
-                    │  - Date & runtime version                          │
-                    │  - PASS/FAIL                                       │
-                    │  - All metrics                                     │
-                    │  - Reproduction steps (if FAIL)                    │
+                    │         BUILDER C — IMPLEMENTATION REVIEW           │
+                    │  Confirms fix matches architecture.                 │
+                    │  Unit tests pass. Compiler passes.                  │
+                    │  Status: IMPLEMENTED                                │
                     └──────────────────────┬──────────────────────────────┘
-                                           │
-                                           ▼
+                                            │
+                                            ▼
                     ┌─────────────────────────────────────────────────────┐
-                    │              BUILDER V — VALIDATION                 │
-                    │                                                    │
-                    │  1. Read Builder T's report                        │
-                    │  2. Repeat each event                              │
-                    │  3. Attempt variations to break PASS results        │
-                    │  4. Confirm or dispute each PASS/FAIL              │
-                    │  5. Document findings                              │
+                    │         BUILDER T — RUNTIME OLYMPICS (REGRESSION)   │
+                    │  Execute Olympic events linked to this fix.         │
+                    │  Measure latency, correctness, convergence.         │
+                    │  Record PASS/FAIL.                                  │
+                    │  Status: RESOLVED (Pending Runtime Certification)   │
                     └──────────────────────┬──────────────────────────────┘
-                                           │
-                                           ▼
+                                            │
+                                            ▼
                     ┌─────────────────────────────────────────────────────┐
-                    │              RESOLUTION (if needed)                 │
-                    │                                                    │
-                    │  If Builder T and Builder V disagree:              │
-                    │  - Builder C reviews evidence                      │
-                    │  - Builder C may request retesting                 │
-                    │  - Builder C makes final determination             │
+                    │         BUILDER V — RUNTIME VALIDATION              │
+                    │  Independently repeat each Olympic event.           │
+                    │  Confirm or dispute Builder T's results.            │
+                    │  Approve or reject closure.                         │
+                    │  Status: VALIDATED (if confirmed)                   │
                     └──────────────────────┬──────────────────────────────┘
-                                           │
-                                           ▼
+                                            │
+                                            ▼
                     ┌─────────────────────────────────────────────────────┐
-                    │              BUILDER C — CERTIFICATION              │
-                    │                                                    │
-                    │  1. Review Builder T report                        │
-                    │  2. Review Builder V report                        │
-                    │  3. Review ledger                                  │
-                    │  4. Determine certification level                  │
-                    │  5. Issue certification                            │
-                    │  6. Update RUNTIME_CERTIFICATION.md                │
+                    │         RUNTIME LEDGER UPDATE                       │
+                    │  Status transition recorded.                        │
+                    │  Builder V's recommendation documented.             │
                     └──────────────────────┬──────────────────────────────┘
-                                           │
-                                           ▼
+                                            │
+                                            ▼
                     ┌─────────────────────────────────────────────────────┐
-                    │              RELEASE CHECKLIST                     │
+                    │         CERTIFICATION (if tier complete)             │
+                    │  Builder C reviews all passed events.               │
+                    │  Issues certification at Bronze/Silver/Gold.        │
+                    │  Status: CLOSED (for each resolved entry)           │
+                    └──────────────────────┬──────────────────────────────┘
+                                            │
+                                            ▼
+                    ┌─────────────────────────────────────────────────────┐
+                    │         RELEASE CHECKLIST                           │
                     │  RUNTIME_FIRST_CHECKLIST.md — 6 questions           │
+                    │  All sign (Builder C, Builder T, Builder V).        │
                     ├─────────────────────────────────────────────────────┤
                     │  ✓ All Yes → Ship                                  │
                     │  ✗ Any No  → Fix → Recertify                      │
                     └──────────────────────┬──────────────────────────────┘
-                                           │
-                                           ▼
+                                            │
+                                            ▼
                     ┌─────────────────────────────────────────────────────┐
-                    │              CERTIFICATION PUBLISHED                │
-                    │                                                    │
-                    │  - RUNTIME_CERTIFICATION.md updated                │
-                    │  - Certification snapshot filed                    │
-                    │  - Runtime score published to dashboard            │
-                    │  - Development continues at certified level        │
+                    │         CERTIFICATION PUBLISHED                     │
+                    │  RUNTIME_CERTIFICATION.md updated.                  │
+                    │  Certification snapshot filed.                      │
+                    │  Development continues at certified level.          │
                     └─────────────────────────────────────────────────────┘
 ```
 
@@ -112,70 +112,127 @@ This document describes the canonical BuilderBoard testing and certification pip
 
 ## Detailed Steps
 
-### Step 0: Roadmap Gate
+### Step 0: Discovery Olympics
 
-**Who**: Builder C (or equivalent authority)
+**Who**: Builder T
 
-**What**: Verify the runtime is certified at the level required by the proposed feature.
+**What**: Explore runtime behavior to discover new failures.
 
 **Process**:
 
-1. Developer presents a feature proposal with the required certification level.
-2. Builder C checks the current certification level in RUNTIME_CERTIFICATION.md.
-3. If the current level meets or exceeds the required level, the gate passes.
-4. If the current level is below the required level, the feature is blocked.
-5. Blocked features must wait for recertification or be reduced in scope.
+1. Launch BuilderBoard.
+2. Execute real engineering workflows.
+3. Observe runtime behavior — latency, correctness, convergence, errors.
+4. Record any failures or anomalies.
+5. If a new failure is found, create a ledger entry.
+
+---
+
+### Step 1: Ledger Entry Created
+
+**Who**: Builder T (or anyone discovering a failure)
+
+**What**: Record the failure in the Runtime Engineering Ledger.
+
+**Process**:
+
+1. Create a new entry using the Ledger Entry template.
+2. Include: root cause analysis, Olympic event linkage, affected files, Verification Source.
+3. Set status to OPEN.
+
+---
+
+### Step 2: Roadmap Gate
+
+**Who**: Builder C
+
+**What**: Verify the runtime is certified at the level required by the proposed fix.
+
+**Process**:
+
+1. Check current certification level in RUNTIME_CERTIFICATION.md.
+2. If the current level meets or exceeds the required level, the gate passes.
+3. If the current level is below the required level, runtime must be fixed first.
 
 **Reference**: See Roadmap Gate section in RUNTIME_ENGINEERING_GUIDE.md.
 
 ---
 
-### Step 1: Implementation Phase
+### Step 3: Builder C — Architecture Review
 
-**Who**: Engineers
+**Who**: Builder C
 
-**What**: Build or modify runtime code.
-
-**Constraint**: No testing during implementation. Testing begins only when Builder T launches the application.
-
----
-
-### Step 2: Builder T Execution
-
-**Who**: Builder T
-
-**What**: Execute each Olympic event against the running application.
+**What**: Validate the investigation and approve the implementation approach.
 
 **Process**:
 
-1. Read the Olympic event definition from `docs/runtime/PHASE0_OLYMPICS.md`.
-2. Launch the BuilderBoard application.
+1. Read the ledger entry and root cause analysis.
+2. Evaluate the proposed approach.
+3. Confirm the approach is consistent with the Core Promise.
+4. Identify the Olympic events required for certification.
+5. Approve or reject the approach.
+
+If rejected, return to Step 1 for further investigation.
+
+---
+
+### Step 4: Jules — Implementation
+
+**Who**: Jules (Implementation Engineer)
+
+**What**: Write and commit the fix.
+
+**Process**:
+
+1. Read the approved architecture.
+2. Implement the fix.
+3. Write regression tests.
+4. Run `cargo test --lib` (or equivalent).
+5. Run `cargo check` and `npm run typecheck`.
+6. Create a Pull Request.
+
+**Constraint**: Implementation occurs after architecture review. No implementation before approval.
+
+---
+
+### Step 5: Builder C — Implementation Review
+
+**Who**: Builder C
+
+**What**: Review the implementation against the approved architecture.
+
+**Process**:
+
+1. Read the Pull Request.
+2. Confirm the implementation matches the approved architecture.
+3. Verify unit tests pass and no regressions exist.
+4. Set status to IMPLEMENTED.
+
+---
+
+### Step 6: Builder T — Regression Olympics
+
+**Who**: Builder T
+
+**What**: Execute Olympic events against the running application.
+
+**Process**:
+
+1. Read the Olympic event definitions linked to this ledger entry.
+2. Launch BuilderBoard.
 3. For each event:
-   a. Perform the user action specified in the Mission.
-   b. Observe the runtime behavior.
-   c. Measure latency and other metrics.
-   d. Compare against Pass Criteria.
-   e. Record PASS or FAIL.
+    a. Perform the user action specified in the Mission.
+    b. Observe the runtime behavior.
+    c. Measure latency and other metrics.
+    d. Compare against Pass Criteria.
+    e. Record PASS or FAIL.
 4. Record all results in the ledger.
-5. Produce a Builder T report.
+5. Set status to RESOLVED (Pending Runtime Certification).
+6. Produce a Builder T test report.
 
 ---
 
-### Step 3: Ledger Entry
-
-**Who**: Builder T
-
-**What**: Record the results in the Runtime Ledger.
-
-**Process**:
-
-1. Create a new ledger entry file in `docs/runtime/ledger/` using the Ledger Entry template.
-2. Include all required fields.
-3. Sign and date the entry.
-
----
-
-### Step 4: Builder V Validation
+### Step 7: Builder V — Runtime Validation
 
 **Who**: Builder V
 
@@ -185,36 +242,38 @@ This document describes the canonical BuilderBoard testing and certification pip
 
 1. Read Builder T's report and ledger entries.
 2. For each event:
-   a. Repeat the exact test procedure.
-   b. Confirm the same results.
-   c. Attempt at least one variation that could cause failure.
-   d. Document CONFIRMED or DISPUTED.
+    a. Repeat the exact test procedure.
+    b. Confirm the same results.
+    c. Attempt at least one variation that could cause failure.
+    d. Document CONFIRMED or DISPUTED.
 3. If any result is disputed, document the evidence and escalate to Builder C.
-4. Produce a Builder V report.
+4. Produce a Builder V validation report.
+5. Approve or reject closure.
+
+If confirmed, set status to VALIDATED.
+If disputed, return to Step 6 or Step 4 depending on the nature of the dispute.
 
 ---
 
-### Step 5: Resolution
+### Step 8: Ledger Update
 
-**Who**: Builder C (if needed)
+**Who**: Builder V (with Builder C review if needed)
 
-**What**: Resolve disagreements between Builder T and Builder V.
+**What**: Record the final status transition.
 
 **Process**:
 
-1. Read both reports.
-2. Evaluate the evidence.
-3. Request retesting if necessary.
-4. Make a final determination.
-5. Document the resolution.
+1. Document Builder V's recommendation.
+2. If approved, set status to CLOSED.
+3. If rejected, document the reason and the required next steps.
 
 ---
 
-### Step 6: Builder C Certification
+### Step 9: Certification
 
 **Who**: Builder C
 
-**What**: Issue formal certification.
+**What**: Issue formal certification when all events at a tier pass.
 
 **Process**:
 
@@ -229,7 +288,7 @@ This document describes the canonical BuilderBoard testing and certification pip
 
 ---
 
-### Step 7: Release Checklist
+### Step 10: Release Checklist
 
 **Who**: Builder C, Builder T, Builder V (all sign)
 
@@ -239,17 +298,17 @@ This document describes the canonical BuilderBoard testing and certification pip
 
 1. Open `docs/runtime/RUNTIME_FIRST_CHECKLIST.md`.
 2. For each of the 6 questions:
-   a. Gather the required evidence.
-   b. Answer Yes or No.
-   c. Record the evidence location.
-3. If all answers are Yes, sign the checklist and proceed to Step 8.
-4. If any answer is No, the release is blocked. Return to Step 1 (Implementation) to fix the issue, then recertify.
+    a. Gather the required evidence.
+    b. Answer Yes or No.
+    c. Record the evidence location.
+3. If all answers are Yes, sign the checklist and proceed to Step 11.
+4. If any answer is No, the release is blocked. Return to Step 4 to fix the issue, then recertify.
 
 **Reference**: `docs/runtime/RUNTIME_FIRST_CHECKLIST.md`
 
 ---
 
-### Step 8: Certification Published
+### Step 11: Certification Published
 
 **What**: The certification is live.
 
@@ -261,6 +320,28 @@ This document describes the canonical BuilderBoard testing and certification pip
 - All subsequent development must maintain this level.
 - Any regression below this level blocks new features.
 - The next certification cycle begins when significant changes are made to the runtime.
+
+---
+
+## Escalation Path
+
+```
+Runtime Olympics (Discovery) reveals blocking issue
+    ↓
+Ledger entry created (OPEN)
+    ↓
+Builder C — Architecture Review
+    ↓
+Jules — Implementation
+    ↓
+Builder C — Implementation Review
+    ↓
+Builder T — Regression Olympics
+    ↓
+Builder V — Validation
+    ↓
+Builder C — Certification (if tier complete)
+```
 
 ---
 
@@ -301,26 +382,6 @@ Next certification cycle reflects improved framework
 
 All changes to the Olympics must be reviewed by Builder C and documented in the ledger.
 
-## Escalation Path
-
-```
-Builder T discovers blocking issue
-    ↓
-Builder T records in ledger
-    ↓
-Builder V confirms issue
-    ↓
-Issue escalated to engineering team
-    ↓
-Issue fixed
-    ↓
-Builder T retests affected events
-    ↓
-Builder V validates
-    ↓
-Builder C recertifies
-```
-
 ---
 
 ## Related Documents
@@ -328,14 +389,11 @@ Builder C recertifies
 | Document | Purpose |
 |----------|---------|
 | `CORE_PROMISE.md` | The single reason BuilderBoard exists |
-| `ENGINEERING_LAWS.md` | Seven permanent engineering principles |
+| `ENGINEERING_LAWS.md` | Twelve permanent engineering principles |
 | `PHASE0_OLYMPICS.md` | Runtime Olympics event definitions |
-| `RUNTIME_ENGINEERING_GUIDE.md` | Complete engineering philosophy handbook |
+| `RUNTIME_ENGINEERING_GUIDE.md` | Complete engineering philosophy handbook and role definitions |
 | `RUNTIME_CERTIFICATION.md` | Current certification status |
 | `RUNTIME_FIRST_CHECKLIST.md` | Release checklist |
 | `RUNTIME_DASHBOARD_SPEC.md` | Dashboard specification |
 | `AUTOMATION_PLAN.md` | Future automation architecture |
-| `BUILDER_T.md` | Runtime Test Engineer role |
-| `BUILDER_V.md` | Validation Engineer role |
-| `BUILDER_C.md` | Runtime Certifier role |
 | `templates/` | Reusable templates |

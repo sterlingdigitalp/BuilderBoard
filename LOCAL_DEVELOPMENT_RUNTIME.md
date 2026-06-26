@@ -4,6 +4,8 @@ BuilderBoard runtime certification uses a packaged, locally signed macOS app.
 
 Do not use `cargo tauri dev` or `npm run dev` for authenticated runtime certification. Those commands run a debug executable whose ad-hoc identity changes after rebuilds, which can cause repeated macOS Keychain prompts.
 
+`npm run dev` remains available for unauthenticated UI-only work. It is not a valid authenticated runtime.
+
 ## Goal
 
 ```text
@@ -93,6 +95,41 @@ npm run runtime:launch
 
 After the first Keychain authorization, rebuilding and reinstalling the app should preserve Keychain trust because the app is signed with the same local signing identity each time.
 
+The launch and certification scripts refuse to run if the debug executable is still active:
+
+```text
+/Users/sterlingdigital/BuilderBoard/target/debug/builderboard
+```
+
+If this happens, quit `npm run dev` / `cargo tauri dev`, then launch the packaged runtime again.
+
+## One-Time Keychain ACL Migration
+
+If BuilderBoard previously stored credentials while running from `cargo tauri dev`, `npm run dev`, or `target/debug/builderboard`, macOS may have authorized those credentials for stale debug executable hashes instead of the stable packaged app.
+
+Symptoms:
+
+- macOS asks for Keychain access repeatedly after rebuilds.
+- Keychain ACLs mention `target/debug/builderboard`.
+- Authenticated runtime testing works once, then prompts again.
+
+Reset only BuilderBoard's local Keychain credential entries:
+
+```sh
+npm run runtime:keychain:reset -- --dry-run
+npm run runtime:keychain:reset -- --yes
+```
+
+Then recreate credentials from the packaged app only:
+
+```sh
+npm run runtime:build -- --launch
+```
+
+Reconnect accounts once in `/Applications/BuilderBoard Dev.app`.
+
+This does not weaken security and does not move secrets outside Keychain. It deletes stale BuilderBoard credentials so macOS can recreate them under the stable packaged app identity.
+
 ## Builder T Workflow
 
 Builder T must use the packaged local runtime:
@@ -111,6 +148,12 @@ cargo tauri dev
 
 for runtime certification.
 
+Before authenticated certification, Builder T must confirm no debug runtime is active:
+
+```sh
+scripts/macos/assert-packaged-runtime.sh
+```
+
 ## Builder V Workflow
 
 Builder V uses the same runtime as Builder T:
@@ -120,6 +163,8 @@ Builder V uses the same runtime as Builder T:
 ```
 
 There is one runtime source of truth for certification.
+
+Builder V must reject evidence collected from `target/debug/builderboard` or `cargo tauri dev` for authenticated provider work.
 
 ## Runtime Certification Loop
 
@@ -201,6 +246,16 @@ If verification reports `CSSMERR_TP_NOT_TRUSTED`, recreate the local identity:
 npm run runtime:setup -- --force
 npm run runtime:build
 ```
+
+If the app verifies but prompts continue, stale credentials are probably ACL-bound to an old debug executable hash. Reset BuilderBoard credentials and recreate them from the packaged app:
+
+```sh
+npm run runtime:keychain:reset -- --dry-run
+npm run runtime:keychain:reset -- --yes
+npm run runtime:build -- --launch
+```
+
+Do not run `npm run dev` while performing authenticated validation.
 
 ### `/Applications` cannot be written
 

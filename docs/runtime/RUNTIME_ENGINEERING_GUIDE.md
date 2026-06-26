@@ -18,7 +18,7 @@ This guide describes how every contributor — engineer, tester, certifier — o
 
 Everything in this guide serves that promise.
 
-The Core Promise is permanently defined in `CORE_PROMISE.md`. It is supported by seven Engineering Laws defined in `ENGINEERING_LAWS.md` which govern all development decisions.
+The Core Promise is permanently defined in `CORE_PROMISE.md`. It is supported by twelve Engineering Laws defined in `ENGINEERING_LAWS.md` which govern all development decisions.
 
 ---
 
@@ -40,6 +40,19 @@ These are important but never override runtime behavior:
 - **Code quality**: Clean code that does not work is not clean — it is technical debt.
 - **Architecture**: An elegant architecture that does not deliver reliable runtime behavior is a design failure.
 - **Documentation**: Documentation that describes non-functional behavior is misinformation.
+
+### Implementation Truth vs Runtime Truth
+
+Implementation does not prove success. Runtime does.
+
+A fix that compiles, passes unit tests, and looks correct in code review is **implemented** — not **resolved**. The distinction is fundamental:
+
+| Truth | How Established | What It Proves |
+|-------|----------------|----------------|
+| **Implementation Truth** | Code audit, compilation, unit tests | The fix is present in the codebase |
+| **Runtime Truth** | Olympic event execution against live runtime | The fix works for a real user |
+
+Implementation Truth must never be confused with Runtime Truth. This principle is codified as Engineering Law 8.
 
 ### Implementation Fungibility
 
@@ -81,11 +94,49 @@ Events are organized by tier (Bronze, Silver, Gold) and scored by weight.
 
 Complete event definitions are in `docs/runtime/PHASE0_OLYMPICS.md`.
 
+### Two Purposes
+
+Runtime Olympics serve two distinct purposes:
+
+1. **Discovery Olympics** — explore runtime behavior to find new failures. These are open-ended investigations that may uncover issues not yet in the ledger. Builder T leads discovery.
+
+2. **Regression Olympics** — re-execute specific events to verify that a fix has been correctly applied and no regressions were introduced. These are deterministic re-tests linked to specific ledger entries. Builder T leads regression testing; Builder V independently validates results.
+
+Every ledger entry must specify which Olympic events certify it and whether those events are discovery or regression in nature.
+
 ---
 
 ## Ledger
 
-The Runtime Ledger is the permanent record of all runtime testing activity.
+The Runtime Ledger is the permanent record of all runtime deficiencies, fixes, and certifications.
+
+### Canonical Status Progression
+
+Every ledger entry follows this lifecycle:
+
+```
+OPEN
+  ↓  (investigation, architecture review)
+IMPLEMENTED
+  ↓  (implementation review, unit tests pass)
+RESOLVED (Pending Runtime Certification)
+  ↓  (Runtime Olympics executed)
+VALIDATED
+  ↓  (Builder V confirms runtime evidence)
+CLOSED
+```
+
+| Status | Meaning | Required Evidence |
+|--------|---------|-------------------|
+| **OPEN** | Issue is acknowledged but no fix has been implemented. Investigation may be in progress. | Ledger entry with root cause analysis, Olympic linkage, and affected files |
+| **IMPLEMENTED** | A fix has been written and committed. Code audit confirms the fix matches the intended change. Unit tests pass. | Code audit, compiler passes, unit test results |
+| **RESOLVED (Pending Runtime Certification)** | Implementation is complete and reviewed. Runtime Olympics have been designed or identified. Awaiting execution of Olympic events against the live runtime. | Implementation review signoff, Olympic event specification |
+| **VALIDATED** | Runtime Olympics have been executed by Builder T. Builder V has independently confirmed the runtime behavior improvement. | Builder T test report, Builder V validation report |
+| **CLOSED** | The issue is confirmed resolved at runtime level. Olympic events pass. No further action required. Reopen if regression occurs. | Certification entry, Olympic pass results |
+
+**Implementation alone never closes a ledger entry.** Only runtime evidence can close an entry. This is Engineering Law 9.
+
+### Entry Structure
 
 Each ledger entry records:
 
@@ -95,6 +146,7 @@ Each ledger entry records:
 - Builder V who validated the test.
 - PASS/FAIL result.
 - Metrics collected.
+- Verification Source (how the runtime behavior was observed).
 - Any observations or anomalies.
 
 The ledger accumulates over time. It provides:
@@ -111,19 +163,34 @@ Current ledger entries are stored in `docs/runtime/ledger/`.
 
 Certification is the process of formally declaring that BuilderBoard meets the Core Runtime Olympics requirements.
 
+### Who Certifies What
+
+Builder C and Builder V have distinct, non-overlapping certification responsibilities:
+
+| Role | Certifies | Does NOT Certify |
+|------|-----------|-----------------|
+| **Builder C** | Architecture soundness. Implementation correctness. Olympic event design. | Runtime behavior. Live application performance. |
+| **Builder V** | Runtime behavior. Olympic event results. Ledger status accuracy. | Implementation correctness. Code quality. Unit test coverage. |
+
+**Certification requires both.** Builder C certifies that the right thing was built. Builder V certifies that it works in the running application. Neither can substitute for the other.
+
+### Certification Tiers
+
 Certification occurs in three tiers corresponding to the Olympic tiers:
 
 - **Bronze Certification**: All Bronze events pass.
 - **Silver Certification**: All Bronze + Silver events pass.
 - **Gold Certification**: All Bronze + Silver + Gold events pass.
 
-Certification is issued by Builder C after review of Builder T and Builder V reports.
-
-Each certification is a snapshot in time. It certifies that the runtime worked correctly at that specific version under those specific conditions.
+### Current Status
 
 Current certification status is maintained in `docs/runtime/RUNTIME_CERTIFICATION.md`.
 
 Historical certifications are stored in `docs/runtime/certification/`.
+
+### Certification Snapshot
+
+Each certification is a snapshot in time. It certifies that the runtime worked correctly at that specific version under those specific conditions.
 
 ---
 
@@ -154,6 +221,7 @@ New Olympic events can be added at any time. Each new event must:
 2. Be assigned a unique Event ID.
 3. Be assigned a certification weight.
 4. Be reviewed by Builder C.
+5. Specify whether it is a Discovery event or Regression event.
 
 Adding events raises the certification bar. This is encouraged.
 
@@ -226,41 +294,157 @@ No developer may bypass the Roadmap Gate. If a feature is implemented while the 
 
 ---
 
-## Role Summary
+## Role Definitions
 
-| Role | Function | Reports To |
-|------|----------|------------|
-| **Builder T** | Executes Olympic events against running application | Builder C |
-| **Builder V** | Validates Builder T's results independently | Builder C |
-| **Builder C** | Reviews evidence, issues certification | — (final authority) |
+### Builder T — Runtime Test Engineer
+
+Builder T is the Runtime Test Engineer.
+
+Builder T:
+- designs and maintains Runtime Olympics
+- executes Olympic events against the running application
+- discovers new runtime failures through experimentation
+- challenges engineering assumptions with runtime evidence
+- measures runtime behavior — latency, correctness, convergence
+- may invalidate existing ledger hypotheses with new evidence
+- produces Builder T test reports
+
+Builder T does **not** implement fixes. Builder T's job is to reveal reality, not to change it.
+
+### Builder V — Runtime Validation Engineer
+
+Builder V is the Runtime Validation Engineer.
+
+Builder V:
+- independently validates every fix produced by Builder C and Jules
+- determines whether runtime evidence supports ledger closure
+- controls the RESOLVED → CLOSED transition
+- approves or rejects every ledger status change
+- produces Builder V validation reports
+
+Builder V does **not** implement fixes. Builder V is the final runtime gatekeeper. No ledger item may close without Builder V signoff.
+
+### Builder C — Architecture and Implementation Reviewer
+
+Builder C has two distinct review stages:
+
+1. **Architecture Review** — reviews investigations, validates the approach, and approves the implementation plan before any code is written.
+2. **Implementation Review** — reviews the completed implementation, confirms it matches the architecture, and verifies unit tests pass.
+
+Builder C:
+- validates investigations and root cause analysis
+- validates implementations against architecture
+- recommends implementation approaches
+- recommends runtime testing priorities
+- reviews Olympic event design
+
+Builder C does **not** certify runtime. Builder C certifies that the implementation is architecturally sound.
+
+### Jules — Implementation Engineer
+
+Jules is the Implementation Engineer.
+
+Jules follows this lifecycle for each task:
+
+```
+Investigate
+    ↓
+Implement
+    ↓
+Regression tests
+    ↓
+Pull Request
+    ↓
+Builder C review
+```
+
+Jules:
+- investigates runtime deficiencies under Builder C direction
+- implements fixes based on approved architecture
+- writes and runs regression tests
+- produces pull requests for Builder C review
+
+Jules does **not** certify runtime. Jules does **not** design Olympic events.
 
 ---
 
 ## Workflow Summary
 
+### Canonical Engineering Lifecycle
+
 ```
-User Mission / Feature Request
+Runtime Olympics (Discovery)
     ↓
-Roadmap Gate — Is runtime certified at the required level?
-    ├── Yes → Proceed to implementation
-    └── No  → Pause feature work. Fix runtime first.
-              ↓
-Implementation Phase (if gate passed)
+Runtime Engineering Ledger (entry created)
     ↓
-Builder T executes Olympic events
+Builder C — Architecture Review
     ↓
-Metrics recorded in Ledger
+Jules — Implementation
     ↓
-Builder V validates results
+Builder C — Implementation Review
     ↓
-Builder C reviews and certifies
+Builder T — Runtime Olympics (Regression)
     ↓
-RUNTIME_CERTIFICATION.md updated
+Builder V — Runtime Validation
+    ↓
+Runtime Ledger Update (status transition)
+    ↓
+Certification (if all events at tier pass)
+```
+
+### Release Path
+
+```
+Certification achieved at required level
     ↓
 Release Checklist (RUNTIME_FIRST_CHECKLIST.md)
     ├── All Yes → Ship
     └── Any No  → Fix → Recertify
 ```
+
+### Escalation Path
+
+```
+Builder T discovers blocking issue
+    ↓
+Builder T records in ledger
+    ↓
+Builder V confirms issue
+    ↓
+Issue escalated to Builder C
+    ↓
+Builder C — Architecture Review
+    ↓
+Jules — Implementation
+    ↓
+Builder C — Implementation Review
+    ↓
+Builder T — Regression Olympics
+    ↓
+Builder V — Validation
+    ↓
+Builder C — Certification (if tier complete)
+```
+
+---
+
+## Verification Source
+
+Every claim about runtime behavior must identify how it was verified.
+
+Verification sources, in order of reliability:
+
+| Source | Reliability | When Used |
+|--------|-------------|-----------|
+| **Runtime Olympics** | Highest | Formal certification events |
+| **Builder T** | High | Discovery testing, experimentation |
+| **Builder V** | High | Independent validation audits |
+| **Builder C Technical Review** | Medium | Architecture and implementation reviews |
+| **Jules Investigation** | Medium | AI agent investigation |
+| **Runtime Trace** | Medium | Automated trace analysis |
+| **User Observation** | Low | Anecdotal reports |
+
+This requirement is codified as Engineering Law 12. Every ledger entry must include a Verification Source field.
 
 ---
 
@@ -269,16 +453,13 @@ Release Checklist (RUNTIME_FIRST_CHECKLIST.md)
 | Document | Purpose |
 |----------|---------|
 | `CORE_PROMISE.md` | The single reason BuilderBoard exists |
-| `ENGINEERING_LAWS.md` | Seven permanent engineering principles |
+| `ENGINEERING_LAWS.md` | Twelve permanent engineering principles |
 | `PHASE0_OLYMPICS.md` | Runtime Olympics event definitions |
 | `RUNTIME_WORKFLOW.md` | Complete runtime lifecycle workflow |
 | `RUNTIME_CERTIFICATION.md` | Current certification status |
 | `RUNTIME_FIRST_CHECKLIST.md` | Release checklist (mandatory before shipping) |
 | `RUNTIME_DASHBOARD_SPEC.md` | Dashboard specification for certification visibility |
 | `AUTOMATION_PLAN.md` | Future automation architecture |
-| `BUILDER_T.md` | Runtime Test Engineer role definition |
-| `BUILDER_V.md` | Validation Engineer role definition |
-| `BUILDER_C.md` | Runtime Certifier role definition |
 | `templates/` | Reusable templates for events, ledger, reports, certifications |
 
 ---

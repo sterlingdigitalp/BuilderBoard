@@ -27,7 +27,7 @@ Runtime First means:
 
 > BuilderBoard exists to allow a single user to accomplish everything possible with one AI software engineering assistant simultaneously across four independent Builder panes. Until this works reliably, BuilderBoard is not considered complete.
 
-This is the single standard against which all work is measured. The Core Promise is permanently documented in `CORE_PROMISE.md` and governed by the seven Engineering Laws in `ENGINEERING_LAWS.md`.
+This is the single standard against which all work is measured. The Core Promise is permanently documented in `CORE_PROMISE.md` and governed by the twelve Engineering Laws in `ENGINEERING_LAWS.md`.
 
 ---
 
@@ -78,7 +78,22 @@ The Olympics are a **living capability definition**, not a fixed checklist. They
 
 This means the Olympics will never be "finished." As BuilderBoard's capabilities expand, the Olympics expand with them. The certification bar rises over time — this is intentional.
 
-### Structure of an Event
+### Discovery vs Regression Olympics
+
+Runtime Olympics serve two distinct purposes:
+
+**Discovery Olympics** are open-ended explorations of runtime behavior. Builder T designs and executes them to find new failures, challenge assumptions, and uncover issues not yet in the ledger. Discovery events may produce unexpected results — that is their purpose. When a discovery event reveals a failure, a new ledger entry is created.
+
+**Regression Olympics** are deterministic re-executions of specific events linked to a particular ledger entry. They verify that a fix has been correctly applied and that no regressions were introduced. Regression events have well-defined pass criteria and expected outcomes. They are executed after every implementation.
+
+| Dimension | Discovery Olympics | Regression Olympics |
+|-----------|-------------------|-------------------|
+| **Purpose** | Find new failures | Verify existing fixes |
+| **Lead** | Builder T | Builder T |
+| **Validation** | Not required | Builder V |
+| **Pass criteria** | Exploratory | Deterministic |
+| **Ledger linkage** | Creates new entry | References existing entry |
+| **Frequency** | Continuous | After every implementation |
 
 ### Structure of an Event
 

@@ -187,7 +187,7 @@ impl Tool for WriteTool {
             args: format!("{} ({} bytes)", path, content.len()),
         });
 
-        let resolved = resolve_safe_path(&ctx, path)?;
+        let resolved = resolve_create_safe_path(&ctx, path)?;
 
         if let Some(parent) = resolved.parent() {
             std::fs::create_dir_all(parent).map_err(|e| {
@@ -552,5 +552,38 @@ fn resolve_safe_path(ctx: &ToolContext, path_str: &str) -> Result<PathBuf, Strin
         } else {
             Err("Relative paths require a project_root or cwd in context".to_string())
         }
+    }
+}
+
+fn resolve_create_safe_path(ctx: &ToolContext, path_str: &str) -> Result<PathBuf, String> {
+    let path = PathBuf::from(path_str);
+
+    if path.is_absolute() {
+        if let Some(ref scope) = ctx.filesystem_scope {
+            scope.resolve_create_path(path_str).map_err(|_| {
+                format!(
+                    "Path '{}' is outside the approved filesystem scope",
+                    path_str
+                )
+            })
+        } else {
+            Ok(path)
+        }
+    } else if let Some(ref root) = ctx.project_root {
+        let candidate = root.join(&path);
+        if let Some(ref scope) = ctx.filesystem_scope {
+            let path_str = candidate.to_string_lossy();
+            scope.resolve_create_path(&path_str).map_err(|_| {
+                format!(
+                    "Path '{}' (resolved to '{}') is outside the approved filesystem scope",
+                    path_str,
+                    candidate.display()
+                )
+            })
+        } else {
+            Ok(candidate)
+        }
+    } else {
+        Err("Relative paths require a project_root or cwd in context".to_string())
     }
 }

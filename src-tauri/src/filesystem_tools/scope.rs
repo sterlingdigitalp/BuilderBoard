@@ -58,40 +58,29 @@ impl ApprovedScope {
         }
 
         let requested = Path::new(requested_path);
-        if requested.is_absolute() {
-            let canonical = requested.canonicalize().map_err(|error| {
-                FilesystemError::NotFound(format!(
-                    "failed to resolve path {}: {error}",
-                    requested_path
-                ))
-            })?;
-            if !is_within_root(&canonical, &self.canonical_root) {
-                return Err(FilesystemError::PathEscape(requested_path.to_string()));
-            }
-            return Ok(canonical);
-        }
-
-        let mut resolved = self.canonical_root.clone();
-        for component in requested.components() {
-            match component {
-                Component::CurDir => {}
-                Component::Normal(part) => resolved.push(part),
-                Component::ParentDir => {
-                    if resolved == self.canonical_root {
-                        return Err(FilesystemError::PathEscape(requested_path.to_string()));
+        let absolute_path = if requested.is_absolute() {
+            requested.to_path_buf()
+        } else {
+            let mut resolved = self.canonical_root.clone();
+            for component in requested.components() {
+                match component {
+                    Component::CurDir => {}
+                    Component::Normal(part) => resolved.push(part),
+                    Component::ParentDir => {
+                        if resolved == self.canonical_root {
+                            return Err(FilesystemError::PathEscape(requested_path.to_string()));
+                        }
+                        resolved.pop();
                     }
-                    resolved.pop();
-                    if !is_within_root(&resolved, &self.canonical_root) {
+                    Component::RootDir | Component::Prefix(_) => {
                         return Err(FilesystemError::PathEscape(requested_path.to_string()));
                     }
                 }
-                Component::RootDir | Component::Prefix(_) => {
-                    return Err(FilesystemError::PathEscape(requested_path.to_string()));
-                }
             }
-        }
+            resolved
+        };
 
-        let canonical = resolved.canonicalize().map_err(|error| {
+        let canonical = canonicalize_longest_prefix(&absolute_path).map_err(|error| {
             FilesystemError::NotFound(format!(
                 "failed to resolve path {}: {error}",
                 requested_path
@@ -106,7 +95,50 @@ impl ApprovedScope {
     }
 
     pub fn resolve_existing_path(&self, requested_path: &str) -> FilesystemResult<PathBuf> {
-        self.resolve_path(requested_path)
+        let path = self.resolve_path(requested_path)?;
+        if !path.exists() {
+            return Err(FilesystemError::NotFound(requested_path.to_string()));
+        }
+        Ok(path)
+    }
+}
+
+fn canonicalize_longest_prefix(path: &Path) -> Result<PathBuf, String> {
+    let mut current = path.to_path_buf();
+    let mut missing_components = Vec::new();
+
+    loop {
+        if current.exists() {
+            let mut canonical = current.canonicalize().map_err(|e| e.to_string())?;
+            for comp in missing_components.into_iter().rev() {
+                canonical.push(comp);
+            }
+
+            let mut final_path = PathBuf::new();
+            for comp in canonical.components() {
+                match comp {
+                    Component::ParentDir => { final_path.pop(); }
+                    Component::CurDir => {}
+                    _ => { final_path.push(comp); }
+                }
+            }
+            return Ok(final_path);
+        }
+
+        let file_name = current.file_name().map(|s| s.to_owned());
+
+        if let Some(parent) = current.parent().map(|p| p.to_path_buf()) {
+            if let Some(name) = file_name {
+                 missing_components.push(name);
+            } else if current.ends_with("..") {
+                 missing_components.push("..".into());
+            } else if current.ends_with(".") {
+                 missing_components.push(".".into());
+            }
+            current = parent;
+        } else {
+            return Err("Root does not exist".to_string());
+        }
     }
 }
 

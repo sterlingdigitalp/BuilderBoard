@@ -94,8 +94,8 @@ Each Runtime Engineering Ledger entry must identify how the observed runtime beh
 Valid verification sources:
 
 - **Runtime Olympics** — formal Olympic event executed against live runtime
-- **Builder T** — Runtime Test Engineer experimentation
-- **Builder V** — Runtime Validation Engineer independent audit
+- **Builder T** — Runtime Experimentalist experiment design and execution
+- **Builder V** — Runtime Evidence Validator independent evidence audit
 - **Builder C Technical Review** — architecture or implementation code review
 - **Jules Investigation** — AI agent investigation and findings
 - **Runtime Trace** — automated trace or log analysis
@@ -111,7 +111,7 @@ When runtime evidence contradicts an architectural assumption, investigation fin
 
 This applies to:
 - **Architectural assumptions**: "The code should work because the design is correct." → Invalid until runtime proves it.
-- **Ledger hypotheses**: "BB-0006 is a planner convergence bug." → May be invalidated if runtime evidence shows it is a prompt completion behavior.
+- **Ledger hypotheses**: "BB-0006 is a planner convergence bug." → Invalidated by Builder T Hypothesis Validation: it is an error recovery and tool call adaptation issue, not convergence. The entry title was updated to reflect runtime evidence.
 - **Investigation findings**: "The root cause is X." → Must be revised if implementation and runtime testing reveal a different root cause.
 - **Engineering hypotheses**: "The planner lacks convergence detection." → May be invalidated when runtime experiments show the planner does converge but lacks error recovery and tool call adaptation.
 

@@ -38,8 +38,8 @@ CLOSED
 Every ledger entry must identify how the observed runtime behavior was verified. Valid sources:
 
 - **Runtime Olympics** — formal Olympic event executed against live runtime
-- **Builder T** — Runtime Test Engineer experimentation
-- **Builder V** — Runtime Validation Engineer independent audit
+- **Builder T** — Runtime Experimentalist experiment design and execution
+- **Builder V** — Runtime Evidence Validator independent evidence audit
 - **Builder C Technical Review** — architecture or implementation code review
 - **Jules Investigation** — AI agent investigation and findings
 - **AUDITS** — Engineering Evidence Library (permanent investigations and analysis)
@@ -420,7 +420,7 @@ New Olympic event or extended OPS-BRZ-007. Repository inventory request complete
 
 ### Notes
 
-Capability gap rather than a bug. Requires a new tool (e.g., `repository.inventory`). Low priority compared to planner convergence (BB-0006) since even without inventory, the planner could work more efficiently with better convergence. Re-evaluate priority after BB-0006.
+Capability gap rather than a bug. Requires a new tool (e.g., `repository.inventory`). Lower priority than error recovery (BB-0006) since even without inventory, better error handling would reduce unnecessary tool calls. Re-evaluate priority after BB-0006.
 
 ---
 

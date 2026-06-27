@@ -12,7 +12,7 @@ runtime/
 ├── RUNTIME_CERTIFICATION.md     # Current certification status (regenerated over time)
 ├── RUNTIME_ENGINEERING_GUIDE.md # Complete engineering philosophy handbook
 ├── PHASE0_OLYMPICS.md           # Definitive Runtime Certification document
-├── BUILDER_T.md                 # Runtime Test Engineer definition
+├── BUILDER_T.md                 # Runtime Experimentalist definition
 ├── BUILDER_V.md                 # Validation Engineer definition
 ├── BUILDER_C.md                 # Runtime Certifier definition
 ├── RUNTIME_WORKFLOW.md          # Complete runtime lifecycle workflow

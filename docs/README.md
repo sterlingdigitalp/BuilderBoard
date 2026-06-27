@@ -29,7 +29,7 @@ The complete framework for testing, validating, and certifying runtime behavior.
 | `runtime/RUNTIME_FIRST_CHECKLIST.md` | Release checklist |
 | `runtime/RUNTIME_DASHBOARD_SPEC.md` | Dashboard specification |
 | `runtime/AUTOMATION_PLAN.md` | Future automation architecture |
-| `runtime/BUILDER_T.md` | Runtime Test Engineer role |
+| `runtime/BUILDER_T.md` | Runtime Experimentalist role |
 | `runtime/BUILDER_V.md` | Validation Engineer role |
 | `runtime/BUILDER_C.md` | Architecture and Implementation Reviewer role |
 | `../JULES.md` | Implementation Engineer (Jules) role |

@@ -292,13 +292,13 @@ Every Runtime Engineering Ledger entry is a hypothesis about reality — not a p
 
 BB-0006 was originally entered as "Planner lacks convergence detection for repository-scale enumeration." The hypothesis was that the planner loop needed a code change to detect when it had gathered sufficient information.
 
-Builder T's planner convergence tests (OPS-CON-001 suite) revealed a different reality:
+The hypothesis evolved through three revisions in a single day as runtime evidence accumulated:
 
-- The planner *does* detect convergence (it checks `tool_calls.is_empty()` every round).
-- The LLM *chooses* to keep calling tools because there is no "stop and answer" signal in the system prompt.
-- The fix may be **prompt engineering** rather than **planner loop changes**.
+1. **v1**: "Planner lacks convergence detection" — architectural assumption.
+2. **v2**: "Prompt lacks completion directive" — OPS-CON-001 suggested loop logic works, prompt may be the issue.
+3. **v3**: "Planner lacks error recovery and tool call adaptation" — Builder T Hypothesis Validation executed Execution 2 against the life runtime trace, revealing 10 identical `filesystem.write` calls with zero adaptation. The planner *converges* correctly but *recovers* from errors incorrectly.
 
-This is a valid ledger hypothesis correction. The entry has been refined to reflect that the root cause may be prompt completion behavior rather than planner convergence logic. The hypothesis will continue to evolve as more runtime evidence is gathered.
+This is a valid ledger hypothesis correction sequence. Each revision was driven by runtime evidence, not speculation. The hypothesis will continue to evolve as more runtime evidence is gathered.
 
 ### Principle
 

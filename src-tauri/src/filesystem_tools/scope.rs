@@ -206,4 +206,38 @@ mod tests {
         let result = scope.resolve_path("escape/secret.txt");
         assert!(matches!(result, Err(FilesystemError::PathEscape(_))));
     }
+
+    #[test]
+    fn resolve_absolute_in_scope_create_path() {
+        let root = temp_dir("resolve-absolute");
+
+        // Create a symlink structure similar to macOS /var -> /private/var
+        // We'll create `private/var` inside our temp root, and symlink `var` to it.
+        let private_var = root.join("private").join("var");
+        fs::create_dir_all(&private_var).expect("create private/var");
+        let var_symlink = root.join("var");
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::symlink;
+            symlink(&private_var, &var_symlink).expect("create symlink");
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::symlink_dir;
+            symlink_dir(&private_var, &var_symlink).expect("create symlink");
+        }
+
+        // The approved root is our simulated /var (the symlink)
+        let scope = ApprovedScope::new(&var_symlink).expect("scope");
+
+        // We want to create a new file in /var/missing.txt
+        let absolute_path_str = var_symlink.join("missing.txt").to_str().unwrap().to_string();
+
+        // Ensure it correctly canonicalizes the existing prefix (/var -> /private/var)
+        // and appends the non-existent part (`missing.txt`) without a scope escape error.
+        let resolved = scope.resolve_path(&absolute_path_str).expect("resolve should succeed for in-scope new file");
+
+        assert_eq!(resolved, private_var.canonicalize().unwrap().join("missing.txt"));
+    }
 }

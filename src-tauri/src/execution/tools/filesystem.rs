@@ -73,6 +73,9 @@ impl Tool for ReadTool {
         });
 
         let resolved = resolve_safe_path(&ctx, path)?;
+        if !resolved.exists() {
+            return Err(format!("Failed to read '{}': No such file or directory", resolved.display()));
+        }
         let content = std::fs::read_to_string(&resolved)
             .map_err(|e| format!("Failed to read '{}': {}", resolved.display(), e))?;
 

@@ -225,6 +225,28 @@ mod tests {
             .is_ok());
     }
 
+    #[test]
+    fn read_file_missing_path_fails() {
+        let tool = crate::execution::tools::filesystem::ReadTool;
+        let mut ctx = default_test_ctx();
+        ctx.project_root = Some(std::env::current_dir().unwrap());
+        let result = tool.execute(ctx, json!({"path": "docs/missing.md"}), &|_| {});
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("Failed to read") || err.contains("NotFound") || err.contains("No such file"));
+    }
+
+    #[test]
+    fn list_dir_missing_path_fails() {
+        let tool = crate::execution::tools::directory::ListTool;
+        let mut ctx = default_test_ctx();
+        ctx.project_root = Some(std::env::current_dir().unwrap());
+        let result = tool.execute(ctx, json!({"path": "docs/missing"}), &|_| {});
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("Failed to list") || err.contains("NotFound") || err.contains("No such file"));
+    }
+
     // -----------------------------------------------------------------------
     // Review Item Tests
     // -----------------------------------------------------------------------

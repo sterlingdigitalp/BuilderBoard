@@ -73,6 +73,9 @@ impl Tool for ListTool {
         });
 
         let resolved = resolve_dir_path(&ctx, path)?;
+        if !resolved.exists() {
+            return Err(format!("Failed to list '{}': No such file or directory", resolved.display()));
+        }
         let entries = std::fs::read_dir(&resolved)
             .map_err(|e| format!("Failed to list '{}': {}", resolved.display(), e))?;
 

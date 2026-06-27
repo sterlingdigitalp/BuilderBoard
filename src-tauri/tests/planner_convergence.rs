@@ -57,10 +57,7 @@ struct ConvergenceResult {
 ///
 /// Takes a pre-planned sequence of LLM responses and a max-rounds limit.
 /// Returns (rounds_used, converged, final_text).
-fn simulate_convergence(
-    responses: Vec<LlmResponse>,
-    max_rounds: u32,
-) -> ConvergenceResult {
+fn simulate_convergence(responses: Vec<LlmResponse>, max_rounds: u32) -> ConvergenceResult {
     let mut rounds_used: u32 = 0;
     let mut response_index = 0usize;
 

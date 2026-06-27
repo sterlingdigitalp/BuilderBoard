@@ -21,7 +21,7 @@ The complete framework for testing, validating, and certifying runtime behavior.
 | Document | Purpose |
 |----------|---------|
 | `runtime/CORE_PROMISE.md` | The single reason BuilderBoard exists |
-| `runtime/ENGINEERING_LAWS.md` | Twelve permanent engineering principles |
+| `runtime/ENGINEERING_LAWS.md` | Fifteen permanent engineering principles |
 | `runtime/PHASE0_OLYMPICS.md` | 14 Olympic events defining runtime requirements |
 | `runtime/RUNTIME_ENGINEERING_GUIDE.md` | Runtime First engineering philosophy handbook |
 | `runtime/RUNTIME_WORKFLOW.md` | Complete runtime lifecycle workflow |

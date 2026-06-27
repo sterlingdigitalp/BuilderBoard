@@ -42,6 +42,7 @@ Every ledger entry must identify how the observed runtime behavior was verified.
 - **Builder V** — Runtime Validation Engineer independent audit
 - **Builder C Technical Review** — architecture or implementation code review
 - **Jules Investigation** — AI agent investigation and findings
+- **AUDITS** — Engineering Evidence Library (permanent investigations and analysis)
 - **Runtime Trace** — automated trace or log analysis
 - **User Observation** — direct observation of user-facing behavior
 
@@ -65,6 +66,7 @@ Every entry represents one independently fixable runtime problem.
 | **Observed Runtime** | What the runtime actually does |
 | **Expected Runtime** | What the runtime should do |
 | **Evidence** | Olympic test results, logs, metrics, investigation reports |
+| **Supporting Evidence** | Cross-references to AUDITS/ directory engineering investigations |
 | **Root Cause** | The single engineering problem |
 | **Depends On** | Lower-level issues that must be fixed before this one can be resolved |
 | **Blocks** | Higher-level issues that depend on this one |
@@ -103,6 +105,11 @@ The scope resolver should accept paths that are syntactically valid and within t
 - Code audit confirmed `resolve_path` at `scope.rs:62-72` and `scope.rs:94-99` used `canonicalize()` which fails for non-existent paths
 - BB-0002 (previous): 11 tool validation failures out of 18 calls on BuilderBoard
 - Known file reads succeeded (OPS-BRZ-004 pass with known paths); new paths failed
+
+### Supporting Evidence
+
+- `AUDITS/REPOSITORY_DISCOVERY_AUDIT.md` — see Filesystem Scope section
+- `AUDITS/RUNTIME_OBSERVABILITY_AUDIT.md` — BB-0004: Not fully diagnosable
 
 ### Root Cause
 
@@ -186,6 +193,11 @@ A search that completes successfully but finds zero matches must return a succes
 - `src-tauri/src/execution/tools/search.rs` — before fix, no-match returned failure status
 - Code audit confirmed the fix: the grep execution path now returns success with empty output when no matches are found
 
+### Supporting Evidence
+
+- `AUDITS/REPOSITORY_DISCOVERY_AUDIT.md` — see Search Behavior section
+- `AUDITS/RUNTIME_OBSERVABILITY_AUDIT.md` — BB-0005: Not fully diagnosable
+
 ### Root Cause
 
 The search tool did not distinguish between "tool failed" (internal error, permission denied) and "tool succeeded but found nothing." Both paths returned an error status.
@@ -241,40 +253,62 @@ OPS-BRZ-007 must pass across all test repositories to fully close this entry. Th
 
 ---
 
-## Entry BB-0006 — Planner lacks convergence detection for repository-scale enumeration
+## Entry BB-0006 — Planner lacks error recovery and tool call adaptation
 
 | Field | Value |
 |-------|-------|
-| **Title** | Planner lacks convergence detection for repository-scale enumeration |
+| **Title** | Planner lacks error recovery and tool call adaptation |
 | **Status** | OPEN |
 | **Priority** | P1 |
 | **Category** | Planner |
-| **Core Definition Impact** | Blocks "searching code" and "understanding a software project" at repository scale |
-| **Runtime Olympics** | Currently fails: OPS-SLV-002 (multi-tool chaining), OPS-SLV-003 (loop termination). Certifying: OPS-SLV-002, OPS-SLV-003 |
-| **Verification Source** | Builder C Technical Review, Runtime Olympics |
+| **Core Definition Impact** | Blocks "searching code," "understanding a software project," and any multi-tool workflow at repository scale |
+| **Runtime Olympics** | Currently fails: OPS-SLV-002 (multi-tool chaining), OPS-SLV-003 (loop termination). Certifying: OPS-SLV-002, OPS-SLV-003. Hypothesis Validation: OPS-CON-001 (planner convergence), OPS-PLAN-001 (tool call diversity under failure) |
+| **Verification Source** | Builder C Technical Review, Builder T Convergence Report, Builder T Hypothesis Validation Report |
 
 ### Observed Runtime
 
-During repository-scale tasks (count files, discover structure, find implementation components), the planner continues issuing tool calls after sufficient information has been gathered. It performs repeated search cycles, re-reads files it already has, and fails to terminate once enough evidence exists. This exhausts the tool-call budget.
+During multi-tool workflows, the planner repeats identical failing tool calls without attempting alternatives. In Execution 2 of the Builder T Hypothesis Validation trace, the planner issued 10 identical `filesystem.write` calls with the same validation error — zero adaptation across all 10 rounds. The planner does not attempt alternative tools when a call fails, does not simplify its approach, and does not gracefully degrade.
 
 ### Expected Runtime
 
-The planner should recognize when it has gathered sufficient information to answer the user's request and terminate with a final response. Convergence detection should limit unnecessary tool calls.
+When a tool call fails, the planner should attempt an alternative approach — try a different tool, simplify the request, or inform the user. The planner should not repeat the identical failing call more than once. Error recovery and tool call adaptation are required for robust runtime behavior.
 
 ### Evidence
 
+- **Builder T Hypothesis Validation Report (2026-06-26):** Execution 2 trace shows 10 identical `filesystem.write` calls with the same validation error, zero adaptation, no alternative tool selection.
+- OPS-CON-001-A through OPS-CON-001-E: planner convergence tests pass (8/8) — confirms loop logic is correct; failure is in LLM behavior.
+- OPS-SLV-002: multi-tool chaining produces duplicate tool calls.
+- OPS-SLV-003: loop termination falls through to fallthrough message.
 - Deficiency #4 in `BuilderBoard 1.0-Current Deficiencies Against Core Definition.md`
-- OPS-SLV-002: multi-tool chaining produces duplicate tool calls
-- OPS-SLV-003: loop termination falls through to fallthrough message
 - BB-0001 (previous): "inefficient exploration strategy, poor stopping criteria"
 
-### Root Cause
+### Supporting Evidence
 
-The planner's loop termination condition is based on a hard round limit rather than semantic convergence. The planner does not evaluate whether it has enough information to answer the request.
+- `AUDITS/RUNTIME_ARCHITECTURE_AUDIT.md` — §2: Planner Convergence & Deduplication Failure
+- `AUDITS/PROMPT_ARCHITECTURE_AUDIT.md` — analysis of missing "stop and answer" prompt directive
+- `AUDITS/REPOSITORY_DISCOVERY_AUDIT.md` — see "Planner Convergence" section
+- `AUDITS/RUNTIME_OBSERVABILITY_AUDIT.md` — BB-0006: Diagnosable
+- `AUDITS/2026-06-26_BUILDER_T_HYPOTHESIS_VALIDATION.md` — Theme 4: Planner Error Recovery (direct runtime evidence of non-adaptation)
+- `AUDITS/2026-06-26_BUILDER_T_CONVERGENCE_REPORT.md` — original discovery of prompt completion vs. planner logic distinction
+
+### Hypothesis (Revised 2026-06-26 — v2, from Hypothesis Validation)
+
+**Original hypothesis (2026-06-26, v1):** The planner loop lacks convergence detection logic — a code change is needed to make it stop issuing tool calls when sufficient information exists.
+
+**Previous hypothesis (2026-06-26, v1 → v2):** The planner *does* detect convergence. The LLM *chooses* to keep calling tools because there is no "stop and answer" signal in the system prompt. Prompt completion behavior rather than planner loop logic.
+
+**Current hypothesis (2026-06-26, v3 — from Builder T Hypothesis Validation report):** The planner *does* converge (confirmed by OPS-CON-001). The observed failure is not convergence or prompt completion — it is **error recovery and tool call adaptation**. In Execution 2 of the trace, the planner issues 10 identical `filesystem.write` calls because each call returns the same validation error, and the planner has no mechanism to recognize the failure pattern and attempt an alternative approach. The planner repeats the call (hoping for a different result) because:
+1. There is no error-type deduplication in the planning loop.
+2. The planner is not instructed to try alternative tools when a specific tool/argument pair fails.
+3. There is no graceful degradation path — if tool A fails, the planner should try tool B or notify the user.
+
+**Evidence:** Direct runtime observation from Hypothesis Validation traces. The loop termination logic (`tool_calls.is_empty()`) works correctly — after the 10th round, the planner returns a response. The problem is that all 10 rounds were spent on the identical failing call. The planner should detect "this same call failed N times" and attempt an alternative approach.
+
+**Status:** Hypothesis confirmed by runtime evidence. The root cause is error recovery and tool call adaptation, not convergence detection. The affected files remain in the planner/execution layer but the fix scope has expanded to include error pattern recognition and alternative tool selection. The prompt engineering approach (v2 hypothesis) is no longer the primary hypothesis — it may be necessary but is not sufficient without error recovery logic.
 
 ### Depends On
 
-(none — root cause. Fixing BB-0004 and BB-0005 will reduce false-positive retries but the convergence problem is independent planner logic.)
+(none — root cause. BB-0004 and BB-0005 reduced false-positive retries but the error recovery problem is independent planner behavior.)
 
 ### Blocks
 
@@ -286,7 +320,7 @@ BB-0009 (budget exhaustion — consequence), BB-0001 (repository discovery — h
 
 ### Affected Files
 
-`src-tauri/src/execution/mod.rs` (planner loop), `src-tauri/src/providers/mod.rs` (round management)
+`src-tauri/src/execution/mod.rs` (planner loop — error recovery logic), `src-tauri/src/providers/mod.rs` (round management — error pattern detection), `src-tauri/src/providers/anthropic.rs` or equivalent (system prompt — "when a tool call fails, try an alternative approach")
 
 ### Assigned
 
@@ -305,10 +339,18 @@ OPS-SLV-002: 3+ tool chain must not produce duplicates. OPS-SLV-003: loop must t
 | Date | Event |
 |------|-------|
 | 2026-06-26 | Created — split from BB-0001 during ledger normalization |
+| 2026-06-26 | Builder T executed OPS-CON-001 planner convergence tests (8/8 pass). Hypothesis v1→v2: root cause may be prompt completion behavior rather than planner loop logic. |
+| 2026-06-26 | Builder T Hypothesis Validation Report (Theme 4) — Execution 2 trace confirms 10 identical failing calls with zero adaptation. Hypothesis v2→v3: root cause is error recovery and tool call adaptation, not convergence detection or prompt completion. |
 
 ### Notes
 
-Still unassigned. This is the next planner fix needed after BB-0004 and BB-0005 are certified. Note: BB-0004 and BB-0005 fixes reduce noise that makes the convergence problem harder to measure.
+The hypothesis for this entry has evolved through three revisions in a single day:
+
+1. **v1: "Planner lacks convergence detection"** — architectural assumption based on deficiency analysis.
+2. **v2: "Prompt lacks completion directive"** — convergence tests showed loop logic is correct, suggesting prompt engineering.
+3. **v3: "Planner lacks error recovery and tool call adaptation"** — Hypothesis Validation trace showed 10 identical failing calls with zero adaptation. The planner *converges* correctly (returns a response) but *recovers* from errors incorrectly (repeats the same call).
+
+This evolution is an example of Engineering Law 15 (Builders Encouraged to Invalidate Incorrect Hypotheses) in action. Each revision was driven by runtime evidence, not architectural speculation. The entry title has been updated to reflect v3 findings.
 
 ---
 
@@ -335,6 +377,12 @@ A single tool call can return a repository inventory: directory tree, file count
 ### Root Cause
 
 No tool exists for repository-level inventory. The planner is forced to use multiple directory listing and search calls to discover structure that could be returned in a single structured response.
+
+### Supporting Evidence
+
+- `AUDITS/RUNTIME_ARCHITECTURE_AUDIT.md` — §3: Suboptimal Repository Discovery Architecture
+- `AUDITS/REPOSITORY_DISCOVERY_AUDIT.md` — see "Missing Fast Repository Inventory" section
+- `AUDITS/RUNTIME_OBSERVABILITY_AUDIT.md` — BB-0008: Diagnosable
 
 ### Depends On
 
@@ -401,6 +449,11 @@ Builder routing should check `global_builder_registry().get(&job.provider_id).is
 - IV&V Report (`docs/PHASE_8_9F_IVV_REPORT.md`): "CRITICAL — Hardcoded builder routing"
 - `src-tauri/src/stream_execution.rs:136` — direct code evidence
 - Merge blocker for main branch
+
+### Supporting Evidence
+
+- `AUDITS/RUNTIME_ARCHITECTURE_AUDIT.md` — §1: Hardcoded Builder Routing (Highest Impact)
+- `AUDITS/RUNTIME_OBSERVABILITY_AUDIT.md` — BB-0003: Partially Diagnosable
 
 ### Root Cause
 
@@ -471,6 +524,10 @@ Each data source should load independently. A failure in one should not prevent 
 
 - Phase 8.9F.2 Independent Runtime Investigation (`docs/PHASE_8_9F2_RUNTIME_INVESTIGATION.md`): 85/100 confidence
 - `src/hooks/usePaneChat.ts:124-129` — `Promise.all` anti-pattern (before fix)
+
+### Supporting Evidence
+
+- `AUDITS/RUNTIME_OBSERVABILITY_AUDIT.md` — BB-0011: Undiagnosable
 
 ### Root Cause
 
@@ -560,6 +617,10 @@ The fix was already in the codebase at the time of the ledger normalization. The
 
 - `src/hooks/usePaneChat.ts:436` — dependency array (before fix): `selectedBuilderId` MISSING
 - `src/hooks/usePaneChat.ts:397` — `builderId: selectedBuilderId || undefined` — value read but not tracked
+
+### Supporting Evidence
+
+- `AUDITS/RUNTIME_OBSERVABILITY_AUDIT.md` — BB-0012: Undiagnosable
 
 ### Root Cause
 
@@ -652,6 +713,11 @@ Repository tools should validate successfully on first attempt in >95% of invoca
 - Cross-repository failure data before fixes: 11/18, 18/30, 9/14, 6/20
 - Runtime Olympics Test 004 (OPS-BRZ-004) executed after fixes: read-file operations succeed with both existing and new paths. Tool failure rate is visibly reduced. Full certification across all events and repositories still pending.
 
+### Supporting Evidence
+
+- `AUDITS/REPOSITORY_DISCOVERY_AUDIT.md` — see Retry Cascades section
+- `AUDITS/RUNTIME_OBSERVABILITY_AUDIT.md` — BB-0002: Diagnosable
+
 ### Root Cause
 
 High tool validation failure rate (from BB-0004 and BB-0005) caused the planner to retry, consuming budget. The primary causes have been fixed; remaining validation failures (if any) need measurement.
@@ -727,13 +793,19 @@ Multi-tool sequences should be efficient: each call should contribute new inform
 - OPS-SLV-004: duplicate detection shows repeated (tool_name, arguments) pairs
 - Note: BB-0004 and BB-0005 fixes reduce retry noise, making the remaining planner efficiency problem more measurable
 
+### Supporting Evidence
+
+- `AUDITS/RUNTIME_ARCHITECTURE_AUDIT.md` — §2: Planner Convergence & Deduplication Failure
+- `AUDITS/REPOSITORY_DISCOVERY_AUDIT.md` — see "Planner Inefficient Sequences" section
+- `AUDITS/RUNTIME_OBSERVABILITY_AUDIT.md` — BB-0009: Diagnosable
+
 ### Root Cause
 
 The planner has no cost-awareness or deduplication in its tool call generation. It can issue the same tool call multiple times because it does not track which calls have already been made.
 
 ### Depends On
 
-BB-0002 (validation retries consume budget — PARTIALLY RESOLVED), BB-0006 (convergence detection — OPEN)
+BB-0002 (validation retries consume budget — PARTIALLY RESOLVED), BB-0006 (error recovery — OPEN)
 
 ### Blocks
 
@@ -741,7 +813,7 @@ BB-0001, BB-0007
 
 ### Related Ledger Items
 
-BB-0002 (validation retries — PARTIALLY RESOLVED), BB-0006 (convergence detection — OPEN), BB-0001 (repository discovery — depends on this)
+BB-0002 (validation retries — PARTIALLY RESOLVED), BB-0006 (error recovery — OPEN), BB-0001 (repository discovery — depends on this)
 
 ### Affected Files
 
@@ -768,7 +840,7 @@ OPS-SLV-002: 3+ tool chain completes in <10 rounds. OPS-SLV-003: loop terminates
 
 ### Notes
 
-Highest priority remaining issue after BB-0004/BB-0005 certification. The planner efficiency problem is now more measurable because the validation retry noise has been reduced. Fixing BB-0006 (convergence detection) is likely the first step.
+Highest priority remaining issue after BB-0004/BB-0005 certification. The planner efficiency problem is now more measurable because the validation retry noise has been reduced. Fixing BB-0006 (error recovery) is the first step — without it, the planner cannot handle any validation or execution error gracefully.
 
 ---
 
@@ -799,9 +871,15 @@ Repository-scale discovery should complete within 10 tool calls and 10 seconds. 
 - BB-0008 evidence: no fast inventory tool forces many individual calls
 - Note: BB-0004 and BB-0005 fixes improve tool success rate but do not directly resolve this — the planner still issues too many calls
 
+### Supporting Evidence
+
+- `AUDITS/RUNTIME_ARCHITECTURE_AUDIT.md` — §3: Suboptimal Repository Discovery Architecture
+- `AUDITS/REPOSITORY_DISCOVERY_AUDIT.md` — comprehensive audit of repository discovery code paths
+- `AUDITS/RUNTIME_OBSERVABILITY_AUDIT.md` — BB-0001: Diagnosable
+
 ### Root Cause
 
-Repository discovery fails because the underlying tool chain cannot efficiently enumerate repository structure. This is a composite symptom of: no fast inventory capability (BB-0008), planner inefficiency (BB-0009), and missing convergence detection (BB-0006).
+Repository discovery fails because the underlying tool chain cannot efficiently enumerate repository structure. This is a composite symptom of: no fast inventory capability (BB-0008), planner inefficiency (BB-0009), and missing error recovery and tool call adaptation (BB-0006).
 
 ### Depends On
 
@@ -813,7 +891,7 @@ BB-0010
 
 ### Related Ledger Items
 
-BB-0009 (budget exhaustion), BB-0008 (inventory), BB-0006 (convergence)
+BB-0009 (budget exhaustion), BB-0008 (inventory), BB-0006 (error recovery)
 
 ### Affected Files
 
@@ -871,9 +949,18 @@ Basic chat response within 30 seconds (OPS-BRZ-002). Single tool execution withi
 - OPS-BRZ-004: tool execution + response exceeded 40s target
 - Runtime Olympics Test 004 (OPS-BRZ-004): after BB-0004/BB-0005 fixes, read-file operations show improved latency. Full latency targets still pending full certification.
 
+### Supporting Evidence
+
+- `AUDITS/RUNTIME_ARCHITECTURE_AUDIT.md` — §4: Database Lock Contention and Runtime Latency
+- `AUDITS/RUNTIME_LATENCY_REPORT.md` — comprehensive latency source ranking
+- `AUDITS/BUILDERBOARD_RUNTIME_LATENCY_ANALYSIS.md` — trace-based per-phase latency breakdown
+- `AUDITS/BACKEND_LOCK_CONTENTION_REPORT.md` — synchronization bottleneck audit
+- `AUDITS/FILESYSTEM_COST_REPORT.md` — unnecessary filesystem operation analysis
+- `AUDITS/RUNTIME_OBSERVABILITY_AUDIT.md` — BB-0007: Diagnosable
+
 ### Root Cause
 
-Runtime latency was a composite symptom of excessive tool call rounds (BB-0009), validation retries adding round-trip time (BB-0002), and inefficient planner sequences (BB-0006). The BB-0004/BB-0005 fixes reduce retry-caused latency.
+Runtime latency was a composite symptom of excessive tool call rounds (BB-0009), validation retries adding round-trip time (BB-0002), and repeated identical failing tool calls due to missing error recovery (BB-0006). The BB-0004/BB-0005 fixes reduce retry-caused latency.
 
 ### Depends On
 
@@ -885,7 +972,7 @@ BB-0010
 
 ### Related Ledger Items
 
-BB-0009 (primary driver), BB-0002 (retry latency — PARTIALLY RESOLVED), BB-0006 (convergence latency — OPEN)
+BB-0009 (budget exhaustion), BB-0002 (retry latency — PARTIALLY RESOLVED), BB-0006 (error recovery latency — OPEN)
 
 ### Affected Files
 
@@ -942,11 +1029,15 @@ A user can assign a Builder a software engineering task and the Builder complete
 - Deficiency #1 in `BuilderBoard 1.0-Current Deficiencies Against Core Definition.md`
 - All Bronze events pending certification
 - BB-0004 and BB-0005 fixes improve tool reliability but are not sufficient
-- BB-0003, BB-0009, BB-0006, BB-0001 still OPEN
+- BB-0003, BB-0009, BB-0006 (error recovery), BB-0001 still OPEN
+
+### Supporting Evidence
+
+- `AUDITS/RUNTIME_OBSERVABILITY_AUDIT.md` — BB-0010: Diagnosable
 
 ### Root Cause
 
-Builders cannot complete engineering requests because the underlying runtime has multiple deficiencies. The primary remaining blockers are: planner budget exhaustion (BB-0009), convergence detection (BB-0006), repository discovery (BB-0001), and hardcoded routing (BB-0003).
+Builders cannot complete engineering requests because the underlying runtime has multiple deficiencies. The primary remaining blockers are: planner budget exhaustion (BB-0009), error recovery and tool call adaptation (BB-0006), repository discovery (BB-0001), and hardcoded routing (BB-0003).
 
 ### Depends On
 
@@ -985,4 +1076,4 @@ All Bronze events as a full suite.
 
 ### Notes
 
-Remaining path to close: BB-0006 → BB-0009 → BB-0008 → BB-0001 → BB-0007 → verify with full Bronze suite. BB-0003 and BB-0011 are independent tracks — BB-0011 is already CLOSED.
+Remaining path to close: BB-0006 (error recovery) → BB-0009 (budget exhaustion, reduced by error recovery) → BB-0008 (inventory) → BB-0001 (discovery) → BB-0007 (latency) → verify with full Bronze suite. BB-0003 and BB-0011 are independent tracks — BB-0011 is already CLOSED.

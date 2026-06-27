@@ -16,7 +16,7 @@ Each Builder operates independently — its own repository, conversation, model,
 
 This promise is the single measure of the product. Everything else is subordinate.
 
-A permanent definition of this promise is maintained in [`CORE_PROMISE.md`](docs/runtime/CORE_PROMISE.md) and governed by twelve [`ENGINEERING_LAWS.md`](docs/runtime/ENGINEERING_LAWS.md).
+A permanent definition of this promise is maintained in [`CORE_PROMISE.md`](docs/runtime/CORE_PROMISE.md) and governed by fifteen [`ENGINEERING_LAWS.md`](docs/runtime/ENGINEERING_LAWS.md).
 
 ## Version 1
 
@@ -114,8 +114,9 @@ Copy `.env.example` to `.env` and fill in the required values. See [`.env.exampl
 3. Read the [Engineering Guide](docs/runtime/RUNTIME_ENGINEERING_GUIDE.md) — understand the Runtime First philosophy.
 4. Check the [Runtime Engineering Ledger](RUNTIME_ENGINEERING_LEDGER.md) — understand what currently needs fixing.
 5. Check the [Current Deficiencies](BuilderBoard%201.0-Current%20Deficiencies%20Against%20Core%20Definition.md) — understand the gaps against Version 1.
-6. Follow the [Runtime Workflow](docs/runtime/RUNTIME_WORKFLOW.md) — understand how testing, validation, and certification work.
-7. See [JULES.md](./JULES.md) if you are an AI engineering agent — context and instructions specific to LLM-based contributors.
+6. Review the [Engineering Evidence Library](AUDITS/README.md) — check existing investigations before starting new work.
+7. Follow the [Runtime Workflow](docs/runtime/RUNTIME_WORKFLOW.md) — understand how testing, validation, and certification work.
+8. See [JULES.md](./JULES.md) if you are an AI engineering agent — context and instructions specific to LLM-based contributors.
 
 ## Project Structure
 
@@ -127,6 +128,7 @@ BuilderBoard/
 ├── BuilderBoard 1.0-Current Deficiencies Against Core Definition.md
 ├── RUNTIME_ENGINEERING_LEDGER.md    # Active engineering issues
 ├── LOCAL_DEVELOPMENT_RUNTIME.md     # Runtime build & launch instructions
+├── AUDITS/                          # Engineering Evidence Library
 ├── JULES.md                         # Context for AI engineering agents
 ├── GITHUB_READINESS.md              # GitHub publishing checklist
 ├── REPOSITORY_AUDIT.md              # Repository audit findings

@@ -21,6 +21,8 @@ Jules does **not** certify runtime. Jules does **not** design Olympic events. Th
 Every task follows this lifecycle:
 
 ```
+Review audits in AUDITS/ directory
+    ↓
 Investigate
     ↓
 Implement
@@ -52,7 +54,7 @@ Each Builder operates independently — its own repository, conversation, model,
 
 This is the single standard against which all work is measured. The canonical definition is in `CORE_PROMISE.md` (`docs/runtime/CORE_PROMISE.md`).
 
-Twelve permanent Engineering Laws in `ENGINEERING_LAWS.md` (`docs/runtime/ENGINEERING_LAWS.md`) govern all development decisions. The most important laws for engineering work:
+Fifteen permanent Engineering Laws in `ENGINEERING_LAWS.md` (`docs/runtime/ENGINEERING_LAWS.md`) govern all development decisions. The most important laws for engineering work:
 
 - **Law 2 — Core Promise Before Expansion**: No feature may be added if it would delay or weaken the Core Promise.
 - **Law 4 — No Issue Closed Until Olympic Event Passes**: A fix is not complete until the corresponding Olympic event passes.
@@ -91,7 +93,7 @@ The engineering capability within each Builder is not yet sufficiently reliable.
 
 **Remaining OPEN blockers (by engineering priority):**
 
-1. **BB-0006** — Planner convergence detection (next to work on)
+1. **BB-0006** — Planner error recovery and tool call adaptation (next to work on)
 2. **BB-0009** — Planner budget exhausted by inefficient sequences (depends on BB-0006)
 3. **BB-0003** — Hardcoded builder routing (independent track, do in parallel)
 4. **BB-0001** — Repository-scale discovery failure (depends on BB-0009)
@@ -143,24 +145,26 @@ Ledger entries should include:
 ## Development Rules
 
 1. **Runtime First**: Always ask "does the running application work better for the user?"
-2. **Ledger Before Fix**: Record the failure in the ledger before implementing any fix.
-3. **Architecture Before Implementation**: Builder C must approve the approach before any code is written.
-4. **Olympics Before Close**: No issue is closed until the corresponding Olympic event passes against the running application.
-5. **Validation Before Close**: Builder V must independently validate every fix before closure.
-6. **Certification Before Ship**: No release ships without current runtime certification.
-7. **Core Promise First**: No feature may weaken or delay the Core Promise.
+2. **Audits Before Investigation**: Check the AUDITS directory for existing evidence before launching a new investigation. Extend or validate existing work rather than duplicating it.
+3. **Ledger Before Fix**: Record the failure in the ledger before implementing any fix.
+4. **Architecture Before Implementation**: Builder C must approve the approach before any code is written.
+5. **Olympics Before Close**: No issue is closed until the corresponding Olympic event passes against the running application.
+6. **Validation Before Close**: Builder V must independently validate every fix before closure.
+7. **Certification Before Ship**: No release ships without current runtime certification.
+8. **Core Promise First**: No feature may weaken or delay the Core Promise.
 
 ## Repository Structure Navigation
 
 | Path | What You Will Find |
 |------|-------------------|
 | `README.md` | Project overview, quick start, contribution guide |
+| `AUDITS/README.md` | Engineering Evidence Library index |
 | `BuilderBoard 1.0-Core Definition.md` | Full Version 1 definition |
 | `BuilderBoard 1.0-Current Deficiencies Against Core Definition.md` | Known gaps against Version 1 |
 | `RUNTIME_ENGINEERING_LEDGER.md` | Active engineering issues |
 | `LOCAL_DEVELOPMENT_RUNTIME.md` | How to build, launch, and test locally |
 | `CORE_PROMISE.md` (`docs/runtime/`) | The single mission |
-| `ENGINEERING_LAWS.md` (`docs/runtime/`) | 12 permanent engineering rules |
+| `ENGINEERING_LAWS.md` (`docs/runtime/`) | 15 permanent engineering rules |
 | `docs/runtime/RUNTIME_ENGINEERING_GUIDE.md` | Engineering philosophy handbook with role definitions |
 | `docs/runtime/PHASE0_OLYMPICS.md` | Olympic event definitions |
 | `docs/runtime/RUNTIME_CERTIFICATION.md` | Current certification status |

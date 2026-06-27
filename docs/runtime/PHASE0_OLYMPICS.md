@@ -27,7 +27,7 @@ Runtime First means:
 
 > BuilderBoard exists to allow a single user to accomplish everything possible with one AI software engineering assistant simultaneously across four independent Builder panes. Until this works reliably, BuilderBoard is not considered complete.
 
-This is the single standard against which all work is measured. The Core Promise is permanently documented in `CORE_PROMISE.md` and governed by the twelve Engineering Laws in `ENGINEERING_LAWS.md`.
+This is the single standard against which all work is measured. The Core Promise is permanently documented in `CORE_PROMISE.md` and governed by the fifteen Engineering Laws in `ENGINEERING_LAWS.md`.
 
 ---
 
@@ -78,22 +78,24 @@ The Olympics are a **living capability definition**, not a fixed checklist. They
 
 This means the Olympics will never be "finished." As BuilderBoard's capabilities expand, the Olympics expand with them. The certification bar rises over time — this is intentional.
 
-### Discovery vs Regression Olympics
+### Three Olympic Modes
 
-Runtime Olympics serve two distinct purposes:
+Runtime Olympics serve three distinct purposes:
 
-**Discovery Olympics** are open-ended explorations of runtime behavior. Builder T designs and executes them to find new failures, challenge assumptions, and uncover issues not yet in the ledger. Discovery events may produce unexpected results — that is their purpose. When a discovery event reveals a failure, a new ledger entry is created.
+**Hypothesis Validation Experiments** are designed to test a specific engineering hypothesis. Builder T designs the experiment with a clear hypothesis, expected outcome, and pass/fail criteria. The experiment produces evidence that either supports or contradicts the hypothesis. When evidence contradicts the hypothesis, a ledger entry is created or the existing entry is refined. These are the most common experiments — they directly serve the engineering lifecycle.
 
-**Regression Olympics** are deterministic re-executions of specific events linked to a particular ledger entry. They verify that a fix has been correctly applied and that no regressions were introduced. Regression events have well-defined pass criteria and expected outcomes. They are executed after every implementation.
+**Discovery Experiments** are open-ended explorations of runtime behavior. Builder T designs and executes them to find new failures, challenge assumptions, and uncover issues not yet in the ledger. Discovery experiments may produce unexpected results — that is their purpose. When a discovery experiment reveals a failure, a hypothesis is recorded and a new ledger entry is created. Discovery experiments are distinct from Hypothesis Validation because the hypothesis is not known in advance.
 
-| Dimension | Discovery Olympics | Regression Olympics |
-|-----------|-------------------|-------------------|
-| **Purpose** | Find new failures | Verify existing fixes |
-| **Lead** | Builder T | Builder T |
-| **Validation** | Not required | Builder V |
-| **Pass criteria** | Exploratory | Deterministic |
-| **Ledger linkage** | Creates new entry | References existing entry |
-| **Frequency** | Continuous | After every implementation |
+**Certification Olympics** are formal execution of the full event suite at a given tier. They determine whether the runtime qualifies for Bronze, Silver, or Gold certification. Certification Olympics are comprehensive sweeps executed when all entries at a tier are closed.
+
+| Dimension | Hypothesis Validation | Discovery | Certification |
+|-----------|----------------------|-----------|---------------|
+| **Purpose** | Test a specific engineering hypothesis | Find new failures | Qualify for tier |
+| **Lead** | Builder T | Builder T | Builder C |
+| **Validation** | Builder V validates evidence | Not required | Builder C issues |
+| **Pass criteria** | Evidence supports or contradicts hypothesis | Exploratory | Full suite pass |
+| **Ledger linkage** | Tests existing hypothesis | Creates new hypothesis | Tier completion |
+| **Frequency** | After every implementation | Continuous | When all entries at tier close |
 
 ### Structure of an Event
 
@@ -331,12 +333,57 @@ To add a new Olympic event:
 
 All events are considered additive. Removing an event is a breaking change to the certification framework. Events may only be retired, never deleted.
 
+---
+
+## Olympic Gap Analysis
+
+The Core Definition requires Builders to perform specific engineering tasks. Each task requires at least one Olympic event. The following table maps the Core Definition to existing and needed Olympic coverage:
+
+| Core Definition Requirement | Existing Events | Gap Status |
+|---------------------------|----------------|------------|
+| Understanding a project | OPS-BRZ-006 (structure read) | Partial — no coverage for understanding intent |
+| Reading files | OPS-BRZ-004 (single read) | Covered |
+| Searching code | OPS-BRZ-007 (grep/glob) | Covered |
+| **Modifying files** | — | **OPEN — new event needed** |
+| Executing tools | OPS-BRZ-004/005/007 | Covered |
+| **Running builds** | — | **OPEN — new event needed** |
+| **Running tests** | — | **OPEN — new event needed** |
+| Explaining code | OPS-SLV-002 (multi-tool) | Partial — implicit through chains |
+| **Fixing bugs** | — | **OPEN — new event needed** |
+| **Implementing changes** | — | **OPEN — new event needed** |
+| Multi-turn conversations | OPS-BRZ-002 (basic chat) | Partial — single-turn only |
+| **Different repositories** | — | **OPEN — new event needed** |
+| **Different model selection** | — | **OPEN — new event needed** |
+| Engineering completion | OPS-SLV-003 (loop term) | Partial — termination only |
+| **Runtime recovery** | — | **OPEN — new event needed** |
+| UI responsiveness | — | OPEN — subjective, hard to automate |
+
+### Scheduled New Events
+
+The following events are scheduled for the next Olympic expansion cycle:
+
+| ID | Name | Tier | Target Core Definition Requirement |
+|----|------|------|-----------------------------------|
+| OPS-BRZ-010 | File modification | Bronze | "modifying files" |
+| OPS-BRZ-011 | Build invocation | Bronze | "running builds" |
+| OPS-BRZ-012 | Test invocation | Bronze | "running tests" |
+| OPS-SLV-005 | Bug fix workflow | Silver | "fixing bugs" |
+| OPS-SLV-006 | Implementation request | Silver | "implementing requested changes" |
+| OPS-SLV-007 | Multi-repository assignment | Silver | "different repository per Builder" |
+| OPS-SLV-008 | Model switching | Silver | "different model selection" |
+| OPS-GLD-003 | Engineering completion | Gold | end-to-end "understand→modify→verify→explain→stop" |
+| OPS-GLD-004 | Runtime recovery | Gold | recovery from crashes and hangs |
+
+Each event follows the event template and must be reviewed by Builder C before being added to the active event list.
+
+---
+
 ## Related Documents
 
 | Document | Purpose |
 |----------|---------|
 | `CORE_PROMISE.md` | The single reason BuilderBoard exists |
-| `ENGINEERING_LAWS.md` | Seven permanent engineering principles |
+| `ENGINEERING_LAWS.md` | Fifteen permanent engineering principles |
 | `RUNTIME_ENGINEERING_GUIDE.md` | Complete engineering philosophy handbook |
 | `RUNTIME_CERTIFICATION.md` | Current certification status |
 | `RUNTIME_WORKFLOW.md` | Complete runtime lifecycle workflow |

@@ -8,7 +8,7 @@ This directory contains the permanent Runtime Certification framework for Builde
 runtime/
 ├── README.md                    # This file
 ├── CORE_PROMISE.md              # The single reason BuilderBoard exists
-├── ENGINEERING_LAWS.md          # Twelve permanent engineering principles
+├── ENGINEERING_LAWS.md          # Fifteen permanent engineering principles
 ├── RUNTIME_CERTIFICATION.md     # Current certification status (regenerated over time)
 ├── RUNTIME_ENGINEERING_GUIDE.md # Complete engineering philosophy handbook
 ├── PHASE0_OLYMPICS.md           # Definitive Runtime Certification document
@@ -25,6 +25,9 @@ runtime/
 ├── ledger/                      # Runtime ledger entries
 ├── olympics/                    # Olympic event definitions
 └── templates/                   # Reusable templates
+
+The repository root also contains:
+- AUDITS/                      # Engineering Evidence Library (permanent investigations)
 ```
 
 ## Philosophy

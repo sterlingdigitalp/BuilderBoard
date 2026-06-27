@@ -2,6 +2,9 @@
 
 BuilderBoard runtime certification uses a packaged, locally signed macOS app.
 
+Before beginning runtime testing, review the [Engineering Evidence Library](AUDITS/README.md)
+for existing investigations and findings relevant to your work.
+
 Do not use `cargo tauri dev` or `npm run dev` for authenticated runtime certification. Those commands run a debug executable whose ad-hoc identity changes after rebuilds, which can cause repeated macOS Keychain prompts.
 
 `npm run dev` remains available for unauthenticated UI-only work. It is not a valid authenticated runtime.
@@ -129,6 +132,29 @@ npm run runtime:build -- --launch
 Reconnect accounts once in `/Applications/BuilderBoard Dev.app`.
 
 This does not weaken security and does not move secrets outside Keychain. It deletes stale BuilderBoard credentials so macOS can recreate them under the stable packaged app identity.
+
+## Keychain Behavior
+
+The first launch of the packaged runtime (`/Applications/BuilderBoard Dev.app`) may prompt for Keychain access once. This is expected — the packaged app needs to register its identity with the macOS Keychain.
+
+Subsequent launches should **not** prompt for Keychain access. If the Keychain prompt appears on every launch, this indicates a runtime regression. The issue must be recorded in the Runtime Engineering Ledger as a new entry.
+
+### Troubleshooting
+
+If Keychain prompts persist:
+
+1. Verify the packaged runtime is being used (`/Applications/BuilderBoard Dev.app`), not `cargo tauri dev`.
+2. Run `scripts/macos/reconnect-keychain.sh` to reset stale credentials.
+3. If prompts continue after reset, file a ledger entry.
+
+## Development vs Certification Runtime
+
+| Mode | Command | Purpose | Keychain Stability |
+|------|---------|---------|-------------------|
+| **Development** | `npm run dev` | UI development, component testing, HMR | Unstable — may lose credentials across restarts |
+| **Certification** | `npm run runtime:build -- --launch` | Authenticated Olympic event execution | Stable — packaged identity persists |
+
+Builder T and Builder V must use the packaged runtime for all Olympic event execution.
 
 ## Builder T Workflow
 

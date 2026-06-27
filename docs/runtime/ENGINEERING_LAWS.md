@@ -105,6 +105,67 @@ This requirement exists to prevent unverified claims from entering the ledger. E
 
 ---
 
+## Law 13 — Runtime Evidence Overrides Assumptions
+
+When runtime evidence contradicts an architectural assumption, investigation finding, or ledger hypothesis, the runtime evidence prevails. Assumptions must be updated to match reality — not the other way around.
+
+This applies to:
+- **Architectural assumptions**: "The code should work because the design is correct." → Invalid until runtime proves it.
+- **Ledger hypotheses**: "BB-0006 is a planner convergence bug." → May be invalidated if runtime evidence shows it is a prompt completion behavior.
+- **Investigation findings**: "The root cause is X." → Must be revised if implementation and runtime testing reveal a different root cause.
+- **Engineering hypotheses**: "The planner lacks convergence detection." → May be invalidated when runtime experiments show the planner does converge but lacks error recovery and tool call adaptation.
+
+Runtime experiments are the highest form of evidence. A well-designed runtime experiment that contradicts an earlier investigation takes precedence over the investigation.
+
+## Law 14 — Ledger Represents Current Understanding, Not Permanent Truth
+
+Every Runtime Engineering Ledger entry is a hypothesis about reality — not a permanent truth.
+
+Ledger entries may be:
+- **Refined**: When new evidence reveals a more precise root cause.
+- **Split**: When a compound entry is found to contain multiple independent problems.
+- **Merged**: When separate entries are determined to share a single root cause.
+- **Invalidated**: When runtime evidence disproves the hypothesis.
+- **Closed**: When runtime evidence confirms resolution.
+
+The ledger is the permanent record of what the team has learned — not what the team assumed.
+
+## Law 15 — Builders Are Encouraged to Invalidate Incorrect Hypotheses
+
+Challenging a ledger entry with runtime evidence is not a failure — it is engineering progress.
+
+Builder T, Builder V, Builder C, and Jules are all encouraged to:
+- Question whether a ledger entry's root cause analysis is correct.
+- Propose alternative explanations based on runtime evidence.
+- Design and execute runtime experiments to test engineering hypotheses.
+- Update the ledger when evidence contradicts current understanding.
+
+The goal is accuracy, not stability. An incorrect ledger entry that is corrected is a success — not a mistake.
+
+Engineering hypotheses are expected to evolve through experimentation. The process is:
+
+```
+Runtime Observation
+    ↓
+Engineering Hypothesis (ledger entry)
+    ↓
+Architecture Review
+    ↓
+Implementation
+    ↓
+Runtime Experiment (Builder T)
+    ↓
+Evidence
+    ↓
+Hypothesis Refinement
+    ↓
+Implementation Update (if required)
+```
+
+A hypothesis that is refined through evidence is evidence of a healthy engineering process — not a failed prediction.
+
+---
+
 ## Amendment Process
 
 These laws are permanent. They may be amended only by:

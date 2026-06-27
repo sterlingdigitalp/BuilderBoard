@@ -10,16 +10,16 @@ This document describes the canonical BuilderBoard engineering and certification
 
 ```
                     ┌─────────────────────────────────────────────────────┐
-                    │         RUNTIME OLYMPICS (DISCOVERY)                │
-                    │  Builder T explores runtime behavior, finds         │
-                    │  failures, challenges assumptions.                  │
+                    │         RUNTIME OBSERVATION                         │
+                    │  Anyone observes runtime behavior — failure,        │
+                    │  anomaly, unexpected result.                        │
                     └──────────────────────┬──────────────────────────────┘
                                             │
                                             ▼
                     ┌─────────────────────────────────────────────────────┐
-                    │         RUNTIME ENGINEERING LEDGER                  │
-                    │  Failure recorded: root cause, Olympic linkage,     │
-                    │  affected files, Verification Source.               │
+                    │         ENGINEERING HYPOTHESIS (LEDGER)              │
+                    │  Hypothesis recorded: observed behavior, expected   │
+                    │  behavior, root cause hypothesis, Olympic linkage.  │
                     │  Status: OPEN                                       │
                     └──────────────────────┬──────────────────────────────┘
                                             │
@@ -35,9 +35,18 @@ This document describes the canonical BuilderBoard engineering and certification
                                             │
                                             ▼
                     ┌─────────────────────────────────────────────────────┐
+                    │         JULES INVESTIGATION + AUDITS                │
+                    │  Investigate root cause. Review existing audits     │
+                    │  for relevant evidence. Produce new audit if none   │
+                    │  exists.                                            │
+                    └──────────────────────┬──────────────────────────────┘
+                                            │
+                                            ▼
+                    ┌─────────────────────────────────────────────────────┐
                     │         BUILDER C — ARCHITECTURE REVIEW             │
-                    │  Validates root cause. Approves approach.           │
-                    │  Identifies Olympic events for certification.       │
+                    │  Validates root cause hypothesis against            │
+                    │  investigation and audit evidence.                  │
+                    │  Approves approach. Identifies Olympic events.      │
                     └──────────────────────┬──────────────────────────────┘
                                             │
                                             ▼
@@ -58,35 +67,38 @@ This document describes the canonical BuilderBoard engineering and certification
                                             │
                                             ▼
                     ┌─────────────────────────────────────────────────────┐
-                    │         BUILDER T — RUNTIME OLYMPICS (REGRESSION)   │
-                    │  Execute Olympic events linked to this fix.         │
-                    │  Measure latency, correctness, convergence.         │
-                    │  Record PASS/FAIL.                                  │
+                    │         BUILDER T — RUNTIME EXPERIMENT              │
+                    │  Design and execute experiment to test the          │
+                    │  hypothesis. Measure observed runtime behavior.     │
+                    │  Determine: does evidence support or contradict     │
+                    │  the hypothesis?                                    │
                     │  Status: RESOLVED (Pending Runtime Certification)   │
                     └──────────────────────┬──────────────────────────────┘
                                             │
                                             ▼
                     ┌─────────────────────────────────────────────────────┐
-                    │         BUILDER V — RUNTIME VALIDATION              │
-                    │  Independently repeat each Olympic event.           │
-                    │  Confirm or dispute Builder T's results.            │
-                    │  Approve or reject closure.                         │
-                    │  Status: VALIDATED (if confirmed)                   │
+                    │         BUILDER V — EVIDENCE VALIDATION              │
+                    │  Independently validate Builder T's evidence.       │
+                    │  Confirm or dispute: does evidence support or       │
+                    │  reject the hypothesis?                             │
+                    │  Approve or reject closure based on evidence.       │
                     └──────────────────────┬──────────────────────────────┘
                                             │
                                             ▼
                     ┌─────────────────────────────────────────────────────┐
-                    │         RUNTIME LEDGER UPDATE                       │
+                    │         RUNTIME LEDGER REFINEMENT                   │
+                    │  Hypothesis refined if evidence contradicted         │
+                    │  original understanding.                            │
                     │  Status transition recorded.                        │
-                    │  Builder V's recommendation documented.             │
+                    │  If hypothesis invalidated → return to implement.   │
                     └──────────────────────┬──────────────────────────────┘
                                             │
                                             ▼
                     ┌─────────────────────────────────────────────────────┐
                     │         CERTIFICATION (if tier complete)             │
-                    │  Builder C reviews all passed events.               │
+                    │  Builder C reviews all passed events and            │
+                    │  supporting evidence.                               │
                     │  Issues certification at Bronze/Silver/Gold.        │
-                    │  Status: CLOSED (for each resolved entry)           │
                     └──────────────────────┬──────────────────────────────┘
                                             │
                                             ▼
@@ -112,19 +124,33 @@ This document describes the canonical BuilderBoard engineering and certification
 
 ## Detailed Steps
 
-### Step 0: Discovery Olympics
+### Step 0: Runtime Observation
 
-**Who**: Builder T
+**Who**: Anyone
 
-**What**: Explore runtime behavior to discover new failures.
+**What**: Observe runtime behavior — a failure, anomaly, or unexpected result.
 
 **Process**:
 
-1. Launch BuilderBoard.
-2. Execute real engineering workflows.
-3. Observe runtime behavior — latency, correctness, convergence, errors.
-4. Record any failures or anomalies.
-5. If a new failure is found, create a ledger entry.
+1. Use BuilderBoard in any capacity.
+2. Observe runtime behavior — latency, correctness, convergence, errors, unexpected results.
+3. Record the observation.
+4. If the observation indicates a runtime deficiency, proceed to Step 1 to create an engineering hypothesis in the ledger.
+
+---
+
+### Step 0a: Engineering Hypothesis (Ledger Entry)
+
+**Who**: Builder T (or anyone discovering a failure)
+
+**What**: Record the runtime observation as an engineering hypothesis in the Runtime Engineering Ledger.
+
+**Process**:
+
+1. Create a new entry using the Ledger Entry template.
+2. Frame the entry as a hypothesis: "The root cause of this observed behavior is X."
+3. Include: observed behavior, expected behavior, root cause hypothesis, Olympic event linkage, affected files, Verification Source.
+4. Set status to OPEN.
 
 ---
 
@@ -158,7 +184,26 @@ This document describes the canonical BuilderBoard engineering and certification
 
 ---
 
-### Step 3: Builder C — Architecture Review
+### Step 3: Audits — Engineering Evidence
+
+**Who**: Builder C / Jules
+
+**What**: Review existing engineering investigations relevant to the ledger entry.
+
+**Process**:
+
+1. Open `AUDITS/README.md` and identify relevant audits by ledger item or topic.
+2. Read the relevant audit documents.
+3. If existing audits cover the topic, use their findings to inform root cause analysis.
+4. If no existing audit covers the topic, Jules conducts an investigation and produces a new audit document.
+5. Cross-reference any audit findings in the ledger entry.
+6. Pass the accumulated evidence to Builder C for Architecture Review.
+
+**Purpose**: Prevents redundant investigations and ensures engineering decisions are based on accumulated evidence.
+
+---
+
+### Step 4: Builder C — Architecture Review
 
 **Who**: Builder C
 
@@ -389,7 +434,7 @@ All changes to the Olympics must be reviewed by Builder C and documented in the 
 | Document | Purpose |
 |----------|---------|
 | `CORE_PROMISE.md` | The single reason BuilderBoard exists |
-| `ENGINEERING_LAWS.md` | Twelve permanent engineering principles |
+| `ENGINEERING_LAWS.md` | Fifteen permanent engineering principles |
 | `PHASE0_OLYMPICS.md` | Runtime Olympics event definitions |
 | `RUNTIME_ENGINEERING_GUIDE.md` | Complete engineering philosophy handbook and role definitions |
 | `RUNTIME_CERTIFICATION.md` | Current certification status |
